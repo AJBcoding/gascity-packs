@@ -182,6 +182,8 @@ class ArtifactHelperTests(unittest.TestCase):
             "plan.v1.yaml": "gc.build.plan.v1",
             "decomposition.v1.yaml": "gc.build.decomposition.v1",
             "implementation-summary.v1.yaml": "gc.build.implementation-summary.v1",
+            "integration-manifest.v1.yaml": "gc.build.integration-manifest.v1",
+            "integration-result.v1.yaml": "gc.build.integration-result.v1",
             "review.v1.yaml": "gc.build.review.v1",
             "final-report.v1.yaml": "gc.build.final-report.v1",
         }

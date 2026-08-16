@@ -238,6 +238,20 @@ class BuildArtifactValidatorTests(unittest.TestCase):
             "Verification",
             "Remaining Risks",
         ],
+        "gc.build.integration-manifest.v1": [
+            "Candidate",
+            "Sources",
+            "Verification",
+            "Safety",
+        ],
+        "gc.build.integration-result.v1": [
+            "Outcome",
+            "Candidate",
+            "Source Map",
+            "Verification",
+            "Conflicts",
+            "Safety",
+        ],
         "gc.build.review.v1": [
             "Verdict",
             "Findings",
@@ -255,6 +269,8 @@ class BuildArtifactValidatorTests(unittest.TestCase):
         "gc.build.plan.v1": "approved",
         "gc.build.decomposition.v1": "approved",
         "gc.build.implementation-summary.v1": "approved",
+        "gc.build.integration-manifest.v1": "approved",
+        "gc.build.integration-result.v1": "approved",
         "gc.build.review.v1": "approved",
         "gc.build.final-report.v1": "approved",
     }
@@ -263,6 +279,8 @@ class BuildArtifactValidatorTests(unittest.TestCase):
         "gc.build.plan.v1": "plan.v1.yaml",
         "gc.build.decomposition.v1": "decomposition.v1.yaml",
         "gc.build.implementation-summary.v1": "implementation-summary.v1.yaml",
+        "gc.build.integration-manifest.v1": "integration-manifest.v1.yaml",
+        "gc.build.integration-result.v1": "integration-result.v1.yaml",
         "gc.build.review.v1": "review.v1.yaml",
         "gc.build.final-report.v1": "final-report.v1.yaml",
     }
@@ -273,7 +291,7 @@ class BuildArtifactValidatorTests(unittest.TestCase):
         sections = []
         for section in self.SCHEMA_SECTIONS[schema]:
             content = f"{section} content."
-            if section in {"Example Mapping", "Summary", "Verdict"}:
+            if section in {"Example Mapping", "Summary", "Verdict", "Candidate", "Outcome"}:
                 content += (
                     "\n\n| ID | Status |\n"
                     "| --- | --- |\n"
@@ -282,6 +300,48 @@ class BuildArtifactValidatorTests(unittest.TestCase):
                 )
             sections.append(f"## {section}\n\n{content}")
         body = "\n\n".join(sections)
+        integration = ""
+        if schema == "gc.build.integration-manifest.v1":
+            integration = """integration:
+  repository: /repo
+  artifact_root: /repo/artifacts
+  remote: origin
+  target_ref: refs/heads/main
+  base_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  sources:
+    - bead_id: task-a
+      base_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      result_sha: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      dependencies: []
+      worktree: /repo/worktrees/task-a
+      changed_paths: [one.txt]
+      summary:
+        path: /repo/artifacts/task-a.md
+        hash: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+  verification:
+    - [python3, -m, unittest]
+"""
+        elif schema == "gc.build.integration-result.v1":
+            integration = """integration:
+  outcome: ready
+  manifest_path: /repo/artifacts/integration-manifest.md
+  manifest_hash: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+  base_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  scratch_worktree: /repo/artifacts/integration/build-20260609-001/attempt-1/candidate
+  candidate_sha: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+  tree_sha: ffffffffffffffffffffffffffffffffffffffff
+  source_map:
+    - bead_id: task-a
+      source_sha: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      integrated_sha: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+  verification:
+    - argv: [python3, -m, unittest]
+      exit_code: 0
+  conflict_paths: []
+  push_performed: false
+  pr_opened: false
+  target_ref_updated: false
+"""
         return f"""---
 schema: {schema}
 workflow:
@@ -295,7 +355,7 @@ producer:
   stage: requirements
   attempt: 1
 status: {self.SCHEMA_STATUS[schema]}
-trace:
+{integration}trace:
   upstream:
     - path: requirements.after.md
       hash: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -310,6 +370,12 @@ trace:
 {body}
 """
 
+    def mutate_integration(self, text: str, mutator) -> str:
+        _, front_matter, body = build_artifact_validator.parse_front_matter(text)
+        mutator(front_matter["integration"])
+        encoded = build_artifact_validator.yaml.safe_dump(front_matter, sort_keys=False).rstrip()
+        return f"---\n{encoded}\n---\n{body}"
+
     def test_build_artifact_accepts_valid_minimal_artifacts_for_all_base_schemas(self) -> None:
         for schema in self.SCHEMA_SECTIONS:
             with self.subTest(schema=schema):
@@ -320,6 +386,97 @@ trace:
 
                 self.assertEqual(artifact.schema_id, schema)
                 self.assertEqual([entry["id"] for entry in artifact.coverage], ["GC-METH-001", "GC-METH-012"])
+
+    def test_integration_manifest_rejects_invalid_source_graph_and_provenance(self) -> None:
+        valid = self.valid_artifact("gc.build.integration-manifest.v1")
+
+        def duplicate(s):
+            s["sources"].append(dict(s["sources"][0]))
+
+        def unknown_dependency(s):
+            s["sources"][0]["dependencies"] = ["missing"]
+
+        def cycle(s):
+            second = dict(s["sources"][0])
+            second.update({"bead_id": "task-b", "result_sha": "c" * 40, "dependencies": ["task-a"]})
+            s["sources"][0]["dependencies"] = ["task-b"]
+            s["sources"].append(second)
+
+        cases = {
+            "duplicate": (duplicate, "duplicates"),
+            "unknown dependency": (unknown_dependency, "unknown dependency"),
+            "cycle": (cycle, "cycle"),
+            "relative repository": (lambda s: s.update(repository="repo"), "absolute path"),
+            "relative worktree": (lambda s: s["sources"][0].update(worktree="worktree"), "absolute path"),
+            "bad sha": (lambda s: s["sources"][0].update(result_sha="ABC123"), "40 lowercase"),
+        }
+        for name, (mutator, message) in cases.items():
+            with self.subTest(name=name), self.assertRaisesRegex(
+                build_artifact_validator.ValidationError, message
+            ):
+                build_artifact_validator.validate_artifact_text(
+                    self.mutate_integration(valid, mutator),
+                    expected_schema="gc.build.integration-manifest.v1",
+                )
+
+    def test_integration_source_order_is_stable_and_dependency_aware(self) -> None:
+        sources = [
+            {"bead_id": "task-c", "dependencies": ["task-a"]},
+            {"bead_id": "task-b", "dependencies": []},
+            {"bead_id": "task-a", "dependencies": []},
+        ]
+
+        self.assertEqual(
+            build_artifact_validator.topological_source_order(sources),
+            ["task-b", "task-a", "task-c"],
+        )
+
+    def test_integration_result_enforces_outcome_specific_evidence(self) -> None:
+        valid = self.valid_artifact("gc.build.integration-result.v1")
+        artifact = build_artifact_validator.validate_artifact_text(
+            valid, expected_schema="gc.build.integration-result.v1"
+        )
+        self.assertEqual(artifact.front_matter["integration"]["outcome"], "ready")
+
+        cases = {
+            "ready candidate": (lambda i: i.pop("candidate_sha"), "candidate_sha"),
+            "ready tree": (lambda i: i.pop("tree_sha"), "tree_sha"),
+            "empty argv": (lambda i: i["verification"][0].update(argv=[]), "argv"),
+            "successful failed outcome": (
+                lambda i: i.update(outcome="failed"),
+                "non-zero exit_code",
+            ),
+            "rework conflict paths": (
+                lambda i: (i.update(outcome="needs_rework"), i.pop("candidate_sha"), i.pop("tree_sha")),
+                "conflict_paths",
+            ),
+        }
+        for name, (mutator, message) in cases.items():
+            with self.subTest(name=name), self.assertRaisesRegex(
+                build_artifact_validator.ValidationError, message
+            ):
+                build_artifact_validator.validate_artifact_text(
+                    self.mutate_integration(valid, mutator),
+                    expected_schema="gc.build.integration-result.v1",
+                )
+
+        needs_rework = self.mutate_integration(
+            valid,
+            lambda i: (
+                i.update(
+                    outcome="needs_rework",
+                    conflict_paths=["src/conflict.py"],
+                    last_clean_candidate_sha="a" * 40,
+                ),
+                i.pop("candidate_sha"),
+                i.pop("tree_sha"),
+            ),
+        )
+        blocked = needs_rework.replace("\nstatus: approved\n", "\nstatus: blocked\n", 1)
+        artifact = build_artifact_validator.validate_artifact_text(
+            blocked, expected_schema="gc.build.integration-result.v1"
+        )
+        self.assertEqual(artifact.front_matter["integration"]["outcome"], "needs_rework")
 
     def test_build_artifact_rejects_missing_front_matter_and_wrong_schema(self) -> None:
         with self.assertRaisesRegex(build_artifact_validator.ValidationError, "front matter"):
