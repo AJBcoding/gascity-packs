@@ -1196,6 +1196,27 @@ class FormulaAssetTests(unittest.TestCase):
         self.assertEqual(contract_steps["assemble-candidate"]["needs"], ["prepare-manifest"])
         self.assertEqual(contract_steps["record-result"]["needs"], ["assemble-candidate"])
 
+        review_assets = [
+            root / "assets/workflows/build-base/review.md",
+            root / "assets/workflows/build-basic/review.md",
+            root / "assets/workflows/build-basic-review/{target}.setup-build-basic-review.md",
+            root / "assets/workflows/build-basic-review/{target}.acceptance-review.md",
+            root / "assets/workflows/build-basic-review/{target}.apply-review-findings.md",
+            root / "assets/workflows/build-basic-review/{target}.md",
+        ]
+        for path in review_assets:
+            review_text = path.read_text(encoding="utf-8")
+            with self.subTest(review_asset=path.name):
+                self.assertIn("scratch_worktree", review_text)
+                self.assertIn("candidate_sha", review_text)
+                self.assertIn("tree_sha", review_text)
+                self.assertNotIn("source anchor/worktree", review_text)
+
+        apply_findings = review_assets[-2].read_text(encoding="utf-8")
+        self.assertIn("structured rework handoff", apply_findings)
+        self.assertIn("fresh immutable integration result", apply_findings)
+        self.assertIn("never reuse a stale result", apply_findings)
+
     def test_build_from_decompose_is_suffix_continuation_entrypoint(self) -> None:
         root = pathlib.Path(__file__).resolve().parents[1]
         data = load_formula(root, "build-from-decompose")
@@ -1522,9 +1543,9 @@ class FormulaAssetTests(unittest.TestCase):
             "code_review.test_evidence_verdict=approve",
             "code_review.simplicity_verdict=approve",
             "bd update \"$CLAIMED_BEAD_ID\"",
-            "source anchor/worktree",
-            "launcher rig root may remain unchanged",
-            "not to the launcher rig root",
+            "integration candidate scratch_worktree",
+            "candidate_sha",
+            "tree_sha",
             "normalized `gc.build.review.v1` artifact with `status: approved`",
             "Do not invoke provider-native subagents",
         ):

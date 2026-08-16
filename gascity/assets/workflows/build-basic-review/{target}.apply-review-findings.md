@@ -1,17 +1,18 @@
 Apply build-basic starter review findings.
 
-Use implementation target {{implementation_target}} for any code changes. Read
-the starter review synthesis. If all three review lanes approve, write a no-op
-review summary. If required fixes or missing evidence remain, make the smallest
-focused changes, run the relevant proof commands, and write the review-fix
-summary under the build artifact root.
+Read the starter review synthesis and the typed integration result recorded in
+the review context. Verify that the reviewed `scratch_worktree`, `candidate_sha`,
+and `tree_sha` still identify the exact same integration candidate.
 
-Apply fixes to the implementation source anchor/worktree named in the review
-context, not to the launcher rig root. An unchanged root checkout is not itself
-a required fix for build-basic; publish owns propagation beyond the source
-anchor. If the only reported issue is "implementation exists in the worktree but
-not the root checkout" and the source anchor/worktree passes the requirements,
-record a no-op fix summary and set `code_review.verdict=done`.
+This shadow phase must not mutate that candidate, a source worktree, or the
+launcher rig root. If all three review lanes approve the exact candidate, write
+a no-op review summary and set `code_review.verdict=done`. If required fixes or
+missing evidence remain, write a structured rework handoff containing the
+candidate SHA and tree, the integration manifest hash and source map, each
+finding, and the smallest required source change. Set
+`code_review.verdict=iterate`. The caller must apply fixes to the relevant
+source, then create a fresh manifest and a fresh immutable integration result;
+never reuse a stale result after source changes.
 
 Set `code_review.verdict=done` only when acceptance, test evidence, and
 simplicity all approve after this pass. Set `code_review.verdict=iterate` when

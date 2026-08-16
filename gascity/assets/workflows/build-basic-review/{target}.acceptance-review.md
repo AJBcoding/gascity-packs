@@ -5,12 +5,12 @@ implementation plan, decomposition, and task summaries. Focus on correctness:
 did the factory build the requested behavior, and did it avoid out-of-scope
 changes?
 
-Read the review context first and evaluate the implementation source
-anchor/worktree recorded there. The launcher rig root is not the review target
-for build-basic; it may still contain the original fixture until publish. Do not
-mark acceptance as `iterate` merely because the root checkout is unchanged when
-the recorded source anchor/worktree implements the requested behavior and its
-proof commands pass.
+Read the review context first and evaluate only the integration candidate
+`scratch_worktree` recorded there. Before reviewing, verify its `HEAD` equals
+`candidate_sha` and its tree equals `tree_sha`; mark the lane `iterate` if
+either identity has drifted. Source anchors and the launcher rig root are not
+review targets. They may remain unchanged because this phase assembles and
+qualifies a shadow candidate without publishing it.
 
 Write findings under the build artifact root. Required findings must include
 the relevant requirement or task reference plus the file, command, or artifact

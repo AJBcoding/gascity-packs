@@ -4,6 +4,10 @@ The `build-basic-review` expansion has already created three review lanes:
 acceptance/correctness, test evidence, and simplicity/maintainability. Record
 that this starter factory review fanout is active, then let the expansion own
 review synthesis, required fixes, and the final `code_review.verdict`.
+All lanes must review the exact integration candidate identified by the typed
+result at `gc.build.integration_result_path`: its `scratch_worktree`,
+`candidate_sha`, and `tree_sha`. Do not approve mixed source worktrees or a
+candidate whose identity has drifted.
 
 Record the synthesized review report path and pass/fail outcome on the workflow
 root bead. Use
