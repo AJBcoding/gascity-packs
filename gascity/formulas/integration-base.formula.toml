@@ -1,0 +1,72 @@
+description = """
+Virtual integration methodology contract.
+
+This integration-base methodology contract converts completed implementation
+source records into one immutable, shadow-only candidate and typed result.
+Concrete methodology packs may override how the manifest is prepared while
+preserving deterministic assembly and result evidence.
+
+Launch inputs:
+- artifact_root: {{artifact_root}}
+- integration_manifest_path: {{integration_manifest_path}}
+- integration_result_path: {{integration_result_path}}
+- integration_target: {{integration_target}}
+"""
+formula = "integration-base"
+version = 1
+contract = "graph.v2"
+target_required = false
+internal = true
+
+[vars]
+[vars.artifact_root]
+description = "Build artifact root."
+required = true
+
+[vars.integration_manifest_path]
+description = "Absolute integration manifest artifact path."
+required = true
+
+[vars.integration_result_path]
+description = "Absolute integration result artifact path."
+required = true
+
+[vars.integration_target]
+description = "Providerless role target for deterministic candidate assembly."
+default = "gc.integration-operator"
+
+[[steps]]
+id = "prepare-manifest"
+title = "Prepare integration manifest"
+metadata = { "gc.run_target" = "gc.run-operator", "gc.build.artifact_schema" = "gc.build.integration-manifest.v1", "gc.build.artifact_path_keys" = "gc.build.integration_manifest_path,gc.var.integration_manifest_path" }
+description_file = "../assets/workflows/integration-base/prepare-manifest.md"
+
+[steps.check]
+max_attempts = 3
+
+[steps.check.check]
+mode = "exec"
+path = ".gc/scripts/checks/build-artifact-valid.sh"
+timeout = "5m"
+
+[[steps]]
+id = "assemble-candidate"
+title = "Assemble shadow candidate"
+needs = ["prepare-manifest"]
+metadata = { "gc.run_target" = "{{integration_target}}" }
+description_file = "../assets/workflows/integration-base/assemble-candidate.md"
+
+[[steps]]
+id = "record-result"
+title = "Record integration result"
+needs = ["assemble-candidate"]
+metadata = { "gc.run_target" = "gc.run-operator", "gc.build.artifact_schema" = "gc.build.integration-result.v1", "gc.build.artifact_path_keys" = "gc.build.integration_result_path,gc.var.integration_result_path" }
+description_file = "../assets/workflows/integration-base/record-result.md"
+
+[steps.check]
+max_attempts = 3
+
+[steps.check.check]
+mode = "exec"
+path = ".gc/scripts/checks/build-artifact-valid.sh"
+timeout = "5m"

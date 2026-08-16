@@ -1,32 +1,23 @@
 Apply build-basic starter review findings.
 
-Use implementation target {{implementation_target}} for any code changes. Read
-the starter review synthesis. If all three review lanes approve, write a no-op
-review summary. If required fixes or missing evidence remain, make the smallest
-focused changes, run the relevant proof commands, and write the review-fix
-summary under the build artifact root.
+Read the starter review synthesis and the typed integration result recorded in
+the review context. Verify that the reviewed `scratch_worktree`, `candidate_sha`,
+and `tree_sha` still identify the exact same integration candidate.
 
-Apply fixes to the implementation source anchor/worktree named in the review
-context, not to the launcher rig root. An unchanged root checkout is not itself
-a required fix for build-basic; publish owns propagation beyond the source
-anchor. If the only reported issue is "implementation exists in the worktree but
-not the root checkout" and the source anchor/worktree passes the requirements,
-record a no-op fix summary and set `code_review.verdict=done`.
+This shadow phase must not mutate that candidate, a source worktree, or the
+launcher rig root. If all three review lanes approve the exact candidate, write
+a no-op review summary and set `code_review.verdict=done`. If required fixes or
+missing evidence remain, write a structured rework handoff containing the
+candidate SHA and tree, the integration manifest hash and source map, each
+finding, and the smallest required source change. Set
+`code_review.verdict=iterate`. The caller must apply fixes to the relevant
+source, then create a fresh manifest and a fresh immutable integration result;
+never reuse a stale result after source changes.
 
-Before editing or running proof commands, read `gc.build.code_review_context_path`
-from the workflow root bead and use its `## Implementation Worktrees` section as
-the authority for writable code. `gc.work_dir` is the launcher rig root, not the
-implementation worktree. Do not inspect or edit the launcher checkout. Select
-the implementation worktree for each finding from the source anchor/worktree
-recorded in the review context, run `cd "$WORKTREE"`, and verify `pwd -P` equals
-that worktree before making changes. Resolve all relative paths in synthesis
-findings against the selected worktree. If a required fix cannot be tied to an
-implementation worktree, write an iterate summary explaining the missing
-worktree evidence and do not patch the launcher root. If multiple worktrees are
-listed and a finding is ambiguous, leave it as iterate until the owning worktree
-is explicit.
-
-Contract: `gc.work_dir` is the launcher rig root, not the implementation worktree.
+Read `gc.build.code_review_context_path` and preserve the exact candidate
+identity from `## Integration Candidate` in either the no-op approval summary or
+the rework handoff. Use `## Source Provenance` to route findings, but do not edit
+or rerun proof in any worktree from this lane. Never patch the launcher root.
 
 Set `code_review.verdict=done` only when acceptance, test evidence, and
 simplicity all approve after this pass. Set `code_review.verdict=iterate` when

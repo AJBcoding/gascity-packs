@@ -19,6 +19,13 @@ Resolve the workflow root bead and artifact root from root metadata. If
 Do not use `gc bd update --metadata 'key=value'`; `--metadata` only accepts a JSON
 object.
 
+Require the validated `gc.build.integration_result_path` and
+`gc.build.integration_result_hash` recorded by the integration stage. Its
+outcome must be `ready`. Use its candidate commit, tree identity, source map,
+and verification records as the authoritative implementation evidence. Never
+present disconnected source-worktree heads as the reviewed or shipped
+candidate.
+
 Collect the closed implementation source anchors and drain child workflows from
 the implementation convoy. Read their recorded implementation summary paths
 from `gc.implementation.summary_path`, `gc.build.implementation_summary_path`,
@@ -67,7 +74,9 @@ The body must include these schema-required sections:
 - Verification
 - Remaining Risks
 
-In those sections, include the implementation convoy id, source anchor ids,
+In those sections, include the implementation convoy id, integration manifest
+and result paths/hashes, candidate commit/tree, source-to-integrated commit map,
+source anchor ids,
 per-item summary paths, changed files, first verification commands, final proof
 commands, observed pass/fail results, and remaining risks. Keep the root
 summary concise, but do not omit accepted requirement IDs.

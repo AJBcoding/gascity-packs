@@ -13,6 +13,10 @@ After resolving the source anchor, write that summary to
 focused commit hash, changed files, and verification result on this implement
 step and on the source anchor before closing this step.
 
+Require the inherited `gc.work_base_commit` before editing. After verification,
+record the exact focused source-worktree `HEAD` as `gc.work_commit` on the
+source anchor. Never replace that value with an integrated or landed commit.
+
 Do not invoke provider-native subagents. Leave the source anchor open for the
 close-source-anchor step.
 

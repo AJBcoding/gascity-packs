@@ -8,6 +8,11 @@ your own diff, and record proof.
 Your summary must include intended behavior, first verification command,
 changed files, proof command, remaining risks, and any release consideration.
 
+Require the inherited `gc.work_base_commit` before editing the source-worktree.
+After the focused commit and proof pass, record exact `HEAD` as
+`gc.work_commit` on the source anchor. Never replace that source result with an
+integrated or landed commit.
+
 Close with `gc.outcome=pass` only after the work is implemented and verified.
 
 Do not invoke provider-native subagents. You are the implementation lane.

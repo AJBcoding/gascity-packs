@@ -5,6 +5,11 @@ assigned item scope, implement the smallest complete change, run focused proof,
 and record intended behavior, first verification command, changed files, proof
 command, and remaining risks.
 
+Before editing the shared source-worktree, record current `HEAD` as this source
+anchor's `gc.work_base_commit` when absent. After the focused commit and proof
+pass, record exact item `HEAD` as `gc.work_commit`. Never replace that source
+result with an integrated or landed commit.
+
 Close with `gc.outcome=pass` only after verification.
 
 Do not invoke provider-native subagents. You are the single item lane.

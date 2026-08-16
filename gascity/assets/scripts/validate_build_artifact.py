@@ -44,6 +44,7 @@ def validate_artifact_text(text: str, *, expected_schema: str = "") -> BuildArti
 
     schema = load_schema(schema_id)
     validate_required_front_matter(front_matter, schema)
+    validate_schema_contract(schema_id, front_matter)
     validate_status(front_matter, schema)
     trace = validate_trace(front_matter)
     upstream = validate_upstream(trace)
@@ -111,6 +112,194 @@ def validate_required_front_matter(front_matter: dict[str, Any], schema: dict[st
     attempt = get_path(front_matter, "producer.attempt")
     if not isinstance(attempt, int) or attempt < 1:
         raise ValidationError("producer.attempt must be a positive integer")
+
+
+def validate_schema_contract(schema_id: str, front_matter: dict[str, Any]) -> None:
+    if schema_id == "gc.build.integration-manifest.v1":
+        validate_integration_manifest(required_mapping(front_matter, "integration"))
+    elif schema_id == "gc.build.integration-result.v1":
+        validate_integration_result(required_mapping(front_matter, "integration"), front_matter)
+
+
+def validate_integration_manifest(integration: dict[str, Any]) -> None:
+    validate_absolute_path(required_string(integration, "repository"), "integration.repository")
+    validate_absolute_path(required_string(integration, "artifact_root"), "integration.artifact_root")
+    required_string(integration, "remote", prefix="integration")
+    required_string(integration, "target_ref", prefix="integration")
+    validate_git_sha(integration.get("base_sha"), "integration.base_sha")
+
+    sources = integration.get("sources")
+    if not isinstance(sources, list) or not sources:
+        raise ValidationError("integration.sources must be a non-empty list")
+    for index, source in enumerate(sources):
+        prefix = f"integration.sources[{index}]"
+        if not isinstance(source, dict):
+            raise ValidationError(f"{prefix} must be a mapping")
+        required_string(source, "bead_id", prefix=prefix)
+        validate_git_sha(source.get("base_sha"), f"{prefix}.base_sha")
+        validate_git_sha(source.get("result_sha"), f"{prefix}.result_sha")
+        dependencies = source.get("dependencies")
+        if not isinstance(dependencies, list) or not all(
+            isinstance(item, str) and item.strip() for item in dependencies
+        ):
+            raise ValidationError(f"{prefix}.dependencies must be a list of non-empty strings")
+        validate_absolute_path(required_string(source, "worktree", prefix=prefix), f"{prefix}.worktree")
+        changed_paths = source.get("changed_paths")
+        if not isinstance(changed_paths, list) or not all(
+            isinstance(item, str) and item.strip() for item in changed_paths
+        ):
+            raise ValidationError(f"{prefix}.changed_paths must be a list of non-empty strings")
+        summary = required_mapping(source, "summary", prefix=prefix)
+        validate_absolute_path(required_string(summary, "path", prefix=f"{prefix}.summary"), f"{prefix}.summary.path")
+        validate_hash(required_string(summary, "hash", prefix=f"{prefix}.summary"), f"{prefix}.summary.hash")
+
+    topological_source_order(sources)
+    validate_argv_list(integration.get("verification"), "integration.verification")
+
+
+def validate_integration_result(integration: dict[str, Any], front_matter: dict[str, Any]) -> None:
+    outcome = required_string(integration, "outcome", prefix="integration")
+    if outcome not in {"ready", "needs_rework", "failed"}:
+        raise ValidationError("integration.outcome must be ready, needs_rework, or failed")
+    validate_absolute_path(required_string(integration, "manifest_path", prefix="integration"), "integration.manifest_path")
+    validate_hash(required_string(integration, "manifest_hash", prefix="integration"), "integration.manifest_hash")
+    validate_git_sha(integration.get("base_sha"), "integration.base_sha")
+    validate_absolute_path(required_string(integration, "scratch_worktree", prefix="integration"), "integration.scratch_worktree")
+
+    source_map = integration.get("source_map")
+    if not isinstance(source_map, list):
+        raise ValidationError("integration.source_map must be a list")
+    if not source_map and outcome != "failed":
+        raise ValidationError("integration.source_map must be non-empty unless outcome is failed")
+    seen: set[str] = set()
+    for index, record in enumerate(source_map):
+        prefix = f"integration.source_map[{index}]"
+        if not isinstance(record, dict):
+            raise ValidationError(f"{prefix} must be a mapping")
+        bead_id = required_string(record, "bead_id", prefix=prefix)
+        if bead_id in seen:
+            raise ValidationError(f"{prefix}.bead_id duplicates {bead_id!r}")
+        seen.add(bead_id)
+        validate_git_sha(record.get("source_sha"), f"{prefix}.source_sha")
+        validate_git_sha(record.get("integrated_sha"), f"{prefix}.integrated_sha")
+
+    verification = integration.get("verification")
+    if not isinstance(verification, list):
+        raise ValidationError("integration.verification must be a list")
+    for index, record in enumerate(verification):
+        if not isinstance(record, dict):
+            raise ValidationError(f"integration.verification[{index}] must be a mapping")
+        validate_argv_list([record.get("argv")], f"integration.verification[{index}].argv")
+        exit_code = record.get("exit_code")
+        if not isinstance(exit_code, int) or isinstance(exit_code, bool):
+            raise ValidationError(f"integration.verification[{index}].exit_code must be an integer")
+
+    for field in ("push_performed", "pr_opened", "target_ref_updated"):
+        if integration.get(field) is not False:
+            raise ValidationError(f"integration.{field} must be false for a shadow integration result")
+
+    if outcome == "ready":
+        validate_git_sha(integration.get("candidate_sha"), "integration.candidate_sha")
+        validate_git_sha(integration.get("tree_sha"), "integration.tree_sha")
+        if any(record["exit_code"] != 0 for record in verification):
+            raise ValidationError("ready integration.verification exit_code values must be zero")
+    elif outcome == "needs_rework":
+        conflicts = integration.get("conflict_paths")
+        if not isinstance(conflicts, list) or not conflicts or not all(
+            isinstance(item, str) and item.strip() for item in conflicts
+        ):
+            raise ValidationError("needs_rework integration.conflict_paths must be a non-empty list")
+        validate_git_sha(integration.get("last_clean_candidate_sha"), "integration.last_clean_candidate_sha")
+    elif not any(record["exit_code"] != 0 for record in verification):
+        failure = integration.get("failure")
+        if not isinstance(failure, dict):
+            raise ValidationError("failed integration requires a non-zero exit_code or failure mapping")
+        required_string(failure, "class", prefix="integration.failure")
+        required_string(failure, "message", prefix="integration.failure")
+
+    status = required_string(front_matter, "status")
+    expected_status = "approved" if outcome == "ready" else "blocked"
+    if status != expected_status:
+        raise ValidationError(f"{outcome} integration result status must be {expected_status}")
+
+
+def validate_git_sha(value: Any, field: str) -> str:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{40}", value) is None:
+        raise ValidationError(f"{field} must be a 40 lowercase hexadecimal Git SHA")
+    return value
+
+
+def validate_hash(value: str, field: str) -> str:
+    if re.fullmatch(r"sha256:[0-9a-f]{64}", value) is None:
+        raise ValidationError(f"{field} must be a sha256 hash")
+    return value
+
+
+def validate_absolute_path(value: str, field: str) -> Path:
+    path = Path(value)
+    if not path.is_absolute():
+        raise ValidationError(f"{field} must be an absolute path")
+    return path
+
+
+def validate_argv_list(value: Any, field: str) -> list[list[str]]:
+    if not isinstance(value, list):
+        raise ValidationError(f"{field} must be a list of argv lists")
+    result: list[list[str]] = []
+    for index, argv in enumerate(value):
+        if not isinstance(argv, list) or not argv or not all(
+            isinstance(item, str) and item for item in argv
+        ):
+            raise ValidationError(f"{field}[{index}] argv must be a non-empty list of strings")
+        result.append(argv)
+    return result
+
+
+def topological_source_order(sources: list[dict[str, Any]]) -> list[str]:
+    records: dict[str, list[str]] = {}
+    manifest_order: list[str] = []
+    for index, source in enumerate(sources):
+        if not isinstance(source, dict):
+            raise ValidationError(f"integration.sources[{index}] must be a mapping")
+        bead_id = required_string(source, "bead_id", prefix=f"integration.sources[{index}]")
+        if bead_id in records:
+            raise ValidationError(f"integration.sources[{index}].bead_id duplicates {bead_id!r}")
+        dependencies = source.get("dependencies")
+        if not isinstance(dependencies, list) or not all(
+            isinstance(item, str) and item.strip() for item in dependencies
+        ):
+            raise ValidationError(f"integration.sources[{index}].dependencies must be a list of non-empty strings")
+        records[bead_id] = dependencies
+        manifest_order.append(bead_id)
+
+    known = set(records)
+    for bead_id, dependencies in records.items():
+        unknown = [dependency for dependency in dependencies if dependency not in known]
+        if unknown:
+            raise ValidationError(f"integration source {bead_id!r} has unknown dependency {unknown[0]!r}")
+
+    ordered: list[str] = []
+    completed: set[str] = set()
+    while len(ordered) < len(records):
+        ready = [
+            bead_id
+            for bead_id in manifest_order
+            if bead_id not in completed and set(records[bead_id]).issubset(completed)
+        ]
+        if not ready:
+            raise ValidationError("integration source dependency graph contains a cycle")
+        for bead_id in ready:
+            completed.add(bead_id)
+            ordered.append(bead_id)
+    return ordered
+
+
+def required_mapping(data: dict[str, Any], key: str, *, prefix: str = "") -> dict[str, Any]:
+    value = data.get(key)
+    field = f"{prefix}.{key}" if prefix else key
+    if not isinstance(value, dict):
+        raise ValidationError(f"{field} must be a mapping")
+    return value
 
 
 def validate_status(front_matter: dict[str, Any], schema: dict[str, Any]) -> None:

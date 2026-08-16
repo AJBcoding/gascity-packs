@@ -1,0 +1,13 @@
+description = """
+Stock ephemeral implementation of the integration-base methodology contract.
+
+The inherited steps produce a typed manifest, assemble and verify one candidate
+in an isolated scratch worktree, and record immutable shadow evidence. This
+formula has no publication or shipped-close authority.
+"""
+formula = "integrate"
+version = 1
+contract = "graph.v2"
+extends = ["integration-base"]
+target_required = false
+internal = true

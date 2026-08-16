@@ -8,6 +8,11 @@ verification, write an item summary to
 source anchor on success. Record the summary path, changed files, and
 verification result on the source anchor before closing it.
 
+Before editing the shared source-worktree, record its current `HEAD` as this
+source anchor's `gc.work_base_commit` when absent. After the focused commit and
+verification, record that exact item commit as `gc.work_commit`. Never replace
+the source result with an integrated or landed commit.
+
 Do not invoke provider-native subagents. This Gas City lane is the work
 delegation mechanism for ce-work.
 

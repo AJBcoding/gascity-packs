@@ -28,10 +28,16 @@ func TestGascityEmbedsPackContent(t *testing.T) {
 		"formulas/implement.formula.toml",
 		"formulas/build-base.formula.toml",
 		"formulas/build-basic.formula.toml",
+		"formulas/integration-base.formula.toml",
+		"formulas/integrate.formula.toml",
 		"skills/mayor/SKILL.md",
+		"schemas/build/integration-manifest.v1.yaml",
+		"schemas/build/integration-result.v1.yaml",
+		"assets/scripts/integrate_candidate.py",
 		"assets/scripts/checks/gap-analysis-approved.sh",
 		"assets/scripts/checks/build-artifact-valid.sh",
 		"roles/pack.toml",
+		"roles/agents/integration-operator/agent.toml",
 	} {
 		if _, err := fs.Stat(pack, rel); err != nil {
 			t.Errorf("gascity pack missing %s: %v", rel, err)

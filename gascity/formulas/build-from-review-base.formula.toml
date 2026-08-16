@@ -47,6 +47,10 @@ required = true
 description = "Implementation summary or evidence artifact path."
 default = ""
 
+[vars.integration_result_path]
+description = "Validated integration result reviewed by this continuation. Empty derives from artifact_root."
+default = ""
+
 [vars.interaction_mode]
 description = "Continuation interaction posture: interactive, autonomous, or headless."
 default = "interactive"
