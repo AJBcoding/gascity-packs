@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import pathlib
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -10,12 +12,7 @@ TESTS_ROOT = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(TESTS_ROOT))
 
 import test_formula_assets
-from test_integrate_candidate import (
-    IntegrationRepositoryFixture,
-    git,
-    load_integrator_module,
-    validate_build_artifact,
-)
+from test_integrate_candidate import IntegrationRepositoryFixture, git, validate_build_artifact
 
 
 class EphemeralIntegrationPipelineTests(unittest.TestCase):
@@ -38,17 +35,38 @@ class EphemeralIntegrationPipelineTests(unittest.TestCase):
         )
         self.assertEqual(continuation_steps["prepare-review"]["needs"], ["integrate"])
 
-        module = load_integrator_module()
         with tempfile.TemporaryDirectory() as temp_dir:
             fixture = IntegrationRepositoryFixture(pathlib.Path(temp_dir))
             manifest = fixture.write_manifest()
             result = fixture.artifact_root / "integration-result.md"
             target_before = fixture.origin_main()
+            installed_helper = fixture.repository / ".gc/scripts/integrate_candidate.py"
+            installed_helper.parent.mkdir(parents=True)
+            for script_name in ("integrate_candidate.py", "validate_build_artifact.py"):
+                shutil.copy2(
+                    gascity_root / "assets/scripts" / script_name,
+                    installed_helper.parent / script_name,
+                )
+            installed_schemas = fixture.repository / "schemas/build"
+            shutil.copytree(gascity_root / "schemas/build", installed_schemas)
 
-            self.assertEqual(
-                module.main(["assemble", "--manifest", str(manifest), "--result", str(result)]),
-                0,
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(installed_helper),
+                    "assemble",
+                    "--manifest",
+                    str(manifest),
+                    "--result",
+                    str(result),
+                ],
+                cwd=fixture.repository,
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
             )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
 
             manifest_artifact = validate_build_artifact.validate_artifact_text(
                 manifest.read_text(encoding="utf-8"),
