@@ -478,6 +478,24 @@ status: {self.SCHEMA_STATUS[schema]}
         )
         self.assertEqual(artifact.front_matter["integration"]["outcome"], "needs_rework")
 
+        preflight_failure = self.mutate_integration(
+            valid,
+            lambda i: (
+                i.update(
+                    outcome="failed",
+                    source_map=[],
+                    verification=[],
+                    failure={"class": "provenance", "message": "source SHA mismatch"},
+                ),
+                i.pop("candidate_sha"),
+                i.pop("tree_sha"),
+            ),
+        ).replace("\nstatus: approved\n", "\nstatus: blocked\n", 1)
+        artifact = build_artifact_validator.validate_artifact_text(
+            preflight_failure, expected_schema="gc.build.integration-result.v1"
+        )
+        self.assertEqual(artifact.front_matter["integration"]["failure"]["class"], "provenance")
+
     def test_build_artifact_rejects_missing_front_matter_and_wrong_schema(self) -> None:
         with self.assertRaisesRegex(build_artifact_validator.ValidationError, "front matter"):
             build_artifact_validator.validate_artifact_text("# Missing front matter\n", expected_schema="gc.build.requirements.v1")

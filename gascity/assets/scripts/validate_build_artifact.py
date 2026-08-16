@@ -167,8 +167,10 @@ def validate_integration_result(integration: dict[str, Any], front_matter: dict[
     validate_absolute_path(required_string(integration, "scratch_worktree", prefix="integration"), "integration.scratch_worktree")
 
     source_map = integration.get("source_map")
-    if not isinstance(source_map, list) or not source_map:
-        raise ValidationError("integration.source_map must be a non-empty list")
+    if not isinstance(source_map, list):
+        raise ValidationError("integration.source_map must be a list")
+    if not source_map and outcome != "failed":
+        raise ValidationError("integration.source_map must be non-empty unless outcome is failed")
     seen: set[str] = set()
     for index, record in enumerate(source_map):
         prefix = f"integration.source_map[{index}]"
@@ -209,7 +211,11 @@ def validate_integration_result(integration: dict[str, Any], front_matter: dict[
             raise ValidationError("needs_rework integration.conflict_paths must be a non-empty list")
         validate_git_sha(integration.get("last_clean_candidate_sha"), "integration.last_clean_candidate_sha")
     elif not any(record["exit_code"] != 0 for record in verification):
-        raise ValidationError("failed integration requires a non-zero exit_code")
+        failure = integration.get("failure")
+        if not isinstance(failure, dict):
+            raise ValidationError("failed integration requires a non-zero exit_code or failure mapping")
+        required_string(failure, "class", prefix="integration.failure")
+        required_string(failure, "message", prefix="integration.failure")
 
     status = required_string(front_matter, "status")
     expected_status = "approved" if outcome == "ready" else "blocked"
