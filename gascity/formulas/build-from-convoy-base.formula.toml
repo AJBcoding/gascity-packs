@@ -27,6 +27,10 @@ default = ""
 description = "Implementation drain policy."
 default = "separate"
 
+[vars.integration_target]
+description = "Providerless on-demand role target for deterministic candidate assembly."
+default = "gc.integration-operator"
+
 [[steps]]
 id = "prepare-convoy"
 title = "Validate implementation convoy"
@@ -64,8 +68,17 @@ member_access = "exclusive"
 single_lane = true
 
 [[steps]]
+id = "integrate"
+title = "Assemble continuation integration candidate"
+needs = ["implement", "implement-same-session"]
+metadata = { "gc.run_target" = "{{integration_target}}" }
+expand = "integrate"
+expand_vars = { artifact_root = "{{artifact_root}}", integration_manifest_path = "{{artifact_root}}/integration-manifest.md", integration_result_path = "{{artifact_root}}/integration-result.md", integration_target = "{{integration_target}}" }
+description_file = "../assets/workflows/build-from-convoy-base/integrate.md"
+
+[[steps]]
 id = "prepare-review"
 title = "Validate review continuation inputs"
-needs = ["implement", "implement-same-session"]
+needs = ["integrate"]
 metadata = { "gc.run_target" = "gc.run-operator" }
 description_file = "../assets/workflows/build-from-convoy-base/prepare-review.md"

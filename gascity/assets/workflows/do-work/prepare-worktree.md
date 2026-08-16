@@ -21,8 +21,11 @@ setup only. Do not edit source files in the launcher checkout.
    `$(pwd)/worktrees/<source-anchor-id>`. If the path is missing, run
    `git worktree add "$WORKTREE" --detach HEAD`. If the path exists but is not
    the worktree for this repository, fail closed.
-5. Persist the absolute path on the source anchor with
-   `bd update <source-anchor-id> --set-metadata work_dir=<absolute worktree path>`.
+5. Before implementation edits, resolve worktree `HEAD` as the immutable item
+   base. If `gc.work_base_commit` is absent, persist that 40-character SHA; if
+   present, verify it is an ancestor of `HEAD` and do not overwrite it.
+6. Persist the absolute path and base on the source anchor with
+   `bd update <source-anchor-id> --set-metadata work_dir=<absolute worktree path> --set-metadata gc.work_base_commit=<base SHA>`.
    For synthetic drain-unit convoys, never persist `work_dir` on the synthetic drain-unit convoy; the original drain member/source anchor is authoritative.
-   Verify the source anchor now has `work_dir` before closing this step with
+   Verify the source anchor now has `work_dir` and `gc.work_base_commit` before closing this step with
    `gc.outcome=pass`.

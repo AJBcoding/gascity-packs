@@ -19,6 +19,8 @@ Launch inputs:
 - decomposition_formula: {{decomposition_formula}}
 - implementation_formula: {{implementation_formula}}
 - implementation_item_formula: {{implementation_item_formula}}
+- integration_formula: {{integration_formula}}
+- integration_target: {{integration_target}}
 - code_review_formula: {{code_review_formula}}
 - review_fix_formula: {{review_fix_formula}}
 - max_iterations: {{max_iterations}}
@@ -89,6 +91,14 @@ default = "implement"
 [vars.implementation_item_formula]
 description = "Single-item implementation formula used by shared-drain adapters."
 default = "do-work-item"
+
+[vars.integration_formula]
+description = "Integration methodology formula used to assemble a review candidate."
+default = "integrate"
+
+[vars.integration_target]
+description = "Providerless on-demand role target for deterministic candidate assembly."
+default = "gc.integration-operator"
 
 [vars.code_review_formula]
 description = "Code-review methodology formula used by adapters that delegate review."
@@ -199,9 +209,18 @@ member_access = "exclusive"
 single_lane = true
 
 [[steps]]
+id = "integrate"
+title = "Assemble shadow integration candidate"
+needs = ["implement", "implement-same-session"]
+metadata = { "gc.run_target" = "{{integration_target}}" }
+expand = "integrate"
+expand_vars = { artifact_root = "{{artifact_root}}", integration_manifest_path = "{{artifact_root}}/integration-manifest.md", integration_result_path = "{{artifact_root}}/integration-result.md", integration_target = "{{integration_target}}" }
+description_file = "../assets/workflows/build-base/integrate.md"
+
+[[steps]]
 id = "summarize-implementation"
 title = "Write canonical implementation summary"
-needs = ["implement", "implement-same-session"]
+needs = ["integrate"]
 metadata = { "gc.run_target" = "gc.run-operator", "gc.build.artifact_schema" = "gc.build.implementation-summary.v1", "gc.build.artifact_path_keys" = "gc.build.implementation_summary_path" }
 description_file = "../assets/workflows/build-base/summarize-implementation.md"
 

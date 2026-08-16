@@ -40,6 +40,8 @@ FORMULAS = {
     "implement",
     "implementation-base",
     "implementation-item-base",
+    "integrate",
+    "integration-base",
     "planning-base",
     "publish",
     "review",
@@ -53,6 +55,7 @@ ROLE_AGENTS = {
     "gap-analyst",
     "implementation-reviewer",
     "implementation-worker",
+    "integration-operator",
     "issue-triager",
     "publisher",
     "requirements-planner",
@@ -85,6 +88,7 @@ BUILD_BASE_STEPS = [
     "decompose",
     "implement",
     "implement-same-session",
+    "integrate",
     "summarize-implementation",
     "review",
     "finalize",
@@ -103,6 +107,7 @@ BUILD_FROM_CONVOY_STEPS = BUILD_FROM_REVIEW_STEPS | {
     "prepare-convoy",
     "implement",
     "implement-same-session",
+    "integrate",
 }
 
 BUILD_FROM_DECOMPOSE_STEPS = BUILD_FROM_CONVOY_STEPS | {
@@ -148,6 +153,16 @@ METHODOLOGY_STAGE_CONTRACTS = {
         "steps": ["implement-item"],
         "target_required": True,
         "vars": {"context_path", "implementation_target"},
+    },
+    "integration-base": {
+        "steps": ["prepare-manifest", "assemble-candidate", "record-result"],
+        "target_required": False,
+        "vars": {
+            "artifact_root",
+            "integration_manifest_path",
+            "integration_result_path",
+            "integration_target",
+        },
     },
     "code-review-base": {
         "steps": ["validate-context", "write-report"],
@@ -251,6 +266,14 @@ AGGREGATE_SUMMARY_GATE = (
     "gc.build.implementation-summary.v1",
     "gc.implementation.summary_path,gc.var.summary_path",
 )
+INTEGRATION_MANIFEST_GATE = (
+    "gc.build.integration-manifest.v1",
+    "gc.build.integration_manifest_path,gc.var.integration_manifest_path",
+)
+INTEGRATION_RESULT_GATE = (
+    "gc.build.integration-result.v1",
+    "gc.build.integration_result_path,gc.var.integration_result_path",
+)
 
 # Producer stages that must keep an explicit build-artifact validation gate.
 # Losing a row, the check wiring, or the repair bound is a contract regression.
@@ -272,6 +295,8 @@ BUILD_ARTIFACT_VALIDATION_GATES = {
     ("implementation-item-base", "implement-item"): ITEM_SUMMARY_GATE,
     ("do-work-item", "implement-item"): ITEM_SUMMARY_GATE,
     ("implement", "summarize"): AGGREGATE_SUMMARY_GATE,
+    ("integration-base", "prepare-manifest"): INTEGRATION_MANIFEST_GATE,
+    ("integration-base", "record-result"): INTEGRATION_RESULT_GATE,
     # Concrete and continuation overrides replace base steps wholesale
     # (mergeSteps replaces by ID), so every producer override must
     # re-declare its gate instead of assuming inheritance.
@@ -842,6 +867,7 @@ class FormulaAssetTests(unittest.TestCase):
             "do-work": ["implementation-base"],
             "do-work-item": ["implementation-item-base"],
             "review": ["code-review-base"],
+            "integrate": ["integration-base"],
         }
         for name, parents in expected_extends.items():
             with self.subTest(formula=name):
@@ -1067,6 +1093,8 @@ class FormulaAssetTests(unittest.TestCase):
         self.assertEqual([step["id"] for step in data["steps"]], BUILD_BASE_STEPS)
         self.assertNotIn("compound", BUILD_BASE_STEPS)
         self.assertEqual(data["vars"]["implementation_target"]["default"], "gc.implementation-worker")
+        self.assertEqual(data["vars"]["integration_target"]["default"], "gc.integration-operator")
+        self.assertEqual(data["vars"]["integration_formula"]["default"], "integrate")
         for var_name, default in METHODOLOGY_FORMULA_VARS.items():
             self.assertEqual(data["vars"][var_name]["default"], default)
 
@@ -1078,6 +1106,7 @@ class FormulaAssetTests(unittest.TestCase):
         self.assertEqual(route_by_step["decompose"], "gc.task-decomposer")
         self.assertEqual(route_by_step["implement"], "{{implementation_target}}")
         self.assertEqual(route_by_step["implement-same-session"], "{{implementation_target}}")
+        self.assertEqual(route_by_step["integrate"], "{{integration_target}}")
         self.assertEqual(route_by_step["review"], "gc.implementation-reviewer")
         self.assertEqual(route_by_step["finalize"], "gc.run-operator")
         self.assertEqual(route_by_step["publish"], "gc.publisher")
@@ -1115,6 +1144,8 @@ class FormulaAssetTests(unittest.TestCase):
             "decomposition_formula: {{decomposition_formula}}",
             "implementation_formula: {{implementation_formula}}",
             "implementation_item_formula: {{implementation_item_formula}}",
+            "integration_formula: {{integration_formula}}",
+            "integration_target: {{integration_target}}",
             "code_review_formula: {{code_review_formula}}",
             "review_fix_formula: {{review_fix_formula}}",
             "max_iterations: {{max_iterations}}",
@@ -1128,6 +1159,42 @@ class FormulaAssetTests(unittest.TestCase):
         ):
             with self.subTest(step="prepare", fragment=fragment):
                 self.assertIn(fragment, prepare_description)
+
+    def test_integration_contract_assembles_one_candidate_before_summary_and_review(self) -> None:
+        root = pathlib.Path(__file__).resolve().parents[1]
+        build = load_formula(root, "build-base")
+        steps = {step["id"]: step for step in build["steps"]}
+
+        integrate = steps["integrate"]
+        self.assertEqual(integrate["needs"], ["implement", "implement-same-session"])
+        self.assertEqual(integrate["expand"], "integrate")
+        self.assertEqual(integrate["metadata"]["gc.run_target"], "{{integration_target}}")
+        self.assertEqual(
+            integrate["expand_vars"],
+            {
+                "artifact_root": "{{artifact_root}}",
+                "integration_manifest_path": "{{artifact_root}}/integration-manifest.md",
+                "integration_result_path": "{{artifact_root}}/integration-result.md",
+                "integration_target": "{{integration_target}}",
+            },
+        )
+        self.assertEqual(steps["summarize-implementation"]["needs"], ["integrate"])
+        self.assertEqual(steps["review"]["needs"], ["summarize-implementation"])
+
+        contract = load_formula(root, "integration-base")
+        concrete_source = load_formula(root, "integrate")
+        concrete = resolve_formula(root, "integrate")
+        self.assertEqual(concrete_source["extends"], ["integration-base"])
+        self.assertEqual(
+            [step["id"] for step in concrete["steps"]],
+            ["prepare-manifest", "assemble-candidate", "record-result"],
+        )
+        contract_steps = {step["id"]: step for step in contract["steps"]}
+        self.assertEqual(contract_steps["prepare-manifest"]["metadata"]["gc.run_target"], "gc.run-operator")
+        self.assertEqual(contract_steps["assemble-candidate"]["metadata"]["gc.run_target"], "{{integration_target}}")
+        self.assertEqual(contract_steps["record-result"]["metadata"]["gc.run_target"], "gc.run-operator")
+        self.assertEqual(contract_steps["assemble-candidate"]["needs"], ["prepare-manifest"])
+        self.assertEqual(contract_steps["record-result"]["needs"], ["assemble-candidate"])
 
     def test_build_from_decompose_is_suffix_continuation_entrypoint(self) -> None:
         root = pathlib.Path(__file__).resolve().parents[1]
@@ -1167,6 +1234,7 @@ class FormulaAssetTests(unittest.TestCase):
             "max_iterations": "10",
             "push": "false",
             "open_pr": "false",
+            "integration_target": "gc.integration-operator",
         }
         for var_name, default in expected_defaults.items():
             with self.subTest(var=var_name):
@@ -1191,7 +1259,9 @@ class FormulaAssetTests(unittest.TestCase):
         self.assertEqual(steps["implement-same-session"]["drain"]["member_access"], "exclusive")
         self.assertEqual(steps["implement-same-session"]["drain"]["on_item_failure"], "skip_remaining")
         self.assertTrue(steps["implement-same-session"]["drain"]["item"]["single_lane"])
-        self.assertEqual(steps["prepare-review"]["needs"], ["implement", "implement-same-session"])
+        self.assertEqual(steps["integrate"]["needs"], ["implement", "implement-same-session"])
+        self.assertEqual(steps["integrate"]["expand"], "integrate")
+        self.assertEqual(steps["prepare-review"]["needs"], ["integrate"])
         self.assertEqual(steps["review"]["needs"], ["prepare-review"])
         self.assertEqual(steps["repair-review"]["needs"], ["review"])
         self.assertEqual(steps["finalize"]["needs"], ["repair-review"])
@@ -1292,7 +1362,8 @@ class FormulaAssetTests(unittest.TestCase):
         self.assertEqual(steps["prepare-convoy"]["needs"], ["decompose"])
         self.assertEqual(steps["implement"]["needs"], ["prepare-convoy"])
         self.assertEqual(steps["implement-same-session"]["needs"], ["prepare-convoy"])
-        self.assertEqual(steps["prepare-review"]["needs"], ["implement", "implement-same-session"])
+        self.assertEqual(steps["integrate"]["needs"], ["implement", "implement-same-session"])
+        self.assertEqual(steps["prepare-review"]["needs"], ["integrate"])
         self.assertEqual(steps["review"]["needs"], ["prepare-review"])
         self.assertEqual(steps["repair-review"]["needs"], ["review"])
         self.assertEqual(steps["finalize"]["needs"], ["repair-review"])
@@ -1315,6 +1386,8 @@ class FormulaAssetTests(unittest.TestCase):
             "gc.outcome=fail",
             "Do not close the workflow root with `gc.outcome=pass`",
             "Publishing disabled or no-op status must never convert",
+            "gc.build.integration-result.v1",
+            "gc.build.integration_result_path",
         ):
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment, text)
@@ -1365,7 +1438,7 @@ class FormulaAssetTests(unittest.TestCase):
             summary_step["metadata"]["gc.build.artifact_path_keys"],
             "gc.build.implementation_summary_path",
         )
-        self.assertEqual(summary_step["needs"], ["implement", "implement-same-session"])
+        self.assertEqual(summary_step["needs"], ["integrate"])
         text = effective_formula_text(root, "build-basic")
         for fragment in (
             "generate-requirements",
@@ -1497,6 +1570,13 @@ class FormulaAssetTests(unittest.TestCase):
             ):
                 with self.subTest(asset=relative_path, fragment=fragment):
                     self.assertIn(fragment, text)
+            self.assertIn("gc.work_commit", text)
+            self.assertIn("gc.work_base_commit", text)
+
+        prepare_worktree_text = (root / "assets/workflows/do-work/prepare-worktree.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("gc.work_base_commit", prepare_worktree_text)
 
         finalize_text = (root / "assets/workflows/build-basic/finalize.md").read_text(encoding="utf-8")
         publish_text = (root / "assets/workflows/build-basic/publish.md").read_text(encoding="utf-8")

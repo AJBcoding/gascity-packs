@@ -79,7 +79,7 @@ this is the shortest path. Each step is copy-pasteable; swap names to taste.
    ```
 
    `build-basic` walks requirements → plan → plan review → decomposition →
-   parallel implementation → a three-lane review fanout → finalize. Artifacts
+   implementation → shadow integration → a three-lane review fanout → finalize. Artifacts
    (requirements, plan, review reports, and a `factory-run.md` summary) land
    under `artifact_root` in your rig.
 
@@ -98,7 +98,7 @@ this is the shortest path. Each step is copy-pasteable; swap names to taste.
 
 | Pack | Process it runs | Reach for it when |
 | ---- | --------------- | ----------------- |
-| [gascity](./gascity) (`build-basic`) | Requirements → plan → review → decompose → implement → three-lane review | You want the default starter factory with the fewest moving parts. |
+| [gascity](./gascity) (`build-basic`) | Requirements → plan → review → decompose → implement → shadow integration → three-lane review | You want the default starter factory with the fewest moving parts. |
 | [bmad](./bmad) (`bmad-build`) | PRD → architecture → epics/stories → readiness gate → story-by-story implementation with self-check and acceptance audit → adversarial review | You want disciplined document-first delivery with explicit story decomposition and readiness checks. |
 | [compound-engineering](./compound-engineering) (`compound-build`) | Brainstorm/plan → plan review → implement → the widest reviewer-persona fanout → resolution | Review depth matters most: correctness, security, performance, migrations, and API contracts each get their own reviewer lane. |
 | [superpowers](./superpowers) (`superpowers-build`) | Brainstorm → written spec approval → per-task test-driven development → spec-compliance then code-quality review | You want hard approval gates before code and strict TDD per task. |

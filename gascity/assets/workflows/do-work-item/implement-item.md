@@ -12,6 +12,14 @@ worktree recorded on the source anchor, run `cd "$WORKTREE"`, and verify
 `pwd -P` equals `$WORKTREE` before any source read, source edit, test, file
 hash, `git add`, or `git commit`.
 
+Before the first item edit, record current worktree `HEAD` on the source anchor
+as `gc.work_base_commit` when absent. After the item's focused commit and final
+proof pass, record that exact 40-character commit as `gc.work_commit`. Later
+items sharing the worktree keep their own base/result pairs. `gc.work_commit`
+always means that item's source-worktree commit; never rewrite it to an
+integrated, published, or landed commit. Read both fields back before closing
+the source anchor.
+
 Write or update the item summary with these schema-required body sections,
 using the exact `##` headings below in this order:
 

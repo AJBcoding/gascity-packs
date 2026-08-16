@@ -63,6 +63,25 @@ LEDGER_REQUIRED_FRAGMENTS = (
     "build-base",
 )
 
+IMPLEMENTATION_PROVENANCE_ASSETS = {
+    "compound-engineering": {
+        "assets/workflows/compound-work/implement.md": ("gc.work_base_commit", "gc.work_commit"),
+        "assets/workflows/compound-work-item/implement-item.md": ("gc.work_base_commit", "gc.work_commit"),
+    },
+    "superpowers": {
+        "assets/workflows/superpowers-development/implement-item.md": ("gc.work_base_commit",),
+        "assets/workflows/superpowers-development/record-item-result.md": ("gc.work_commit",),
+    },
+    "bmad": {
+        "assets/workflows/bmad-story-development/implement.md": ("gc.work_base_commit", "gc.work_commit"),
+        "assets/workflows/bmad-story-development/implement-item.md": ("gc.work_base_commit", "gc.work_commit"),
+    },
+    "gstack": {
+        "assets/workflows/gstack-work/implement.md": ("gc.work_base_commit", "gc.work_commit"),
+        "assets/workflows/gstack-work-item/implement-item.md": ("gc.work_base_commit", "gc.work_commit"),
+    },
+}
+
 
 def pack_formula_dirs(pack_name: str) -> list[pathlib.Path]:
     return [GASCITY_ROOT / "formulas", PACKS_ROOT / pack_name / "formulas"]
@@ -134,6 +153,15 @@ def pack_methodology_metadata(pack_name: str, expected: dict) -> dict:
 
 class DerivedPackCompatibilityTests(unittest.TestCase):
     maxDiff = None
+
+    def test_implementation_overrides_record_source_commit_provenance(self) -> None:
+        for pack_name, assets in IMPLEMENTATION_PROVENANCE_ASSETS.items():
+            for relative_path, required_fragments in assets.items():
+                with self.subTest(pack=pack_name, asset=relative_path):
+                    text = (PACKS_ROOT / pack_name / relative_path).read_text(encoding="utf-8")
+                    for fragment in required_fragments:
+                        self.assertIn(fragment, text)
+                    self.assertIn("source-worktree", text)
 
     def test_packs_import_gascity_base_as_gc(self) -> None:
         for pack_name, expected in DERIVED_PACKS.items():

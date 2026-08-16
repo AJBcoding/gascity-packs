@@ -2,7 +2,7 @@
 
 This is the base pack for running full software-delivery workflows in Gas
 City: gather requirements, write and review a plan, decompose into tasks,
-implement in parallel agent sessions, review the result, and optionally
+implement in agent sessions, assemble one shadow candidate, review that candidate, and optionally
 publish. It ships three things:
 
 - **Workflow formulas** — `build-basic` (the starter factory), the
@@ -52,7 +52,7 @@ and your project added as a rig (`gc rig add .` inside the repo). See the
    ```
 
 3. Watch it run. The workflow walks requirements → plan → plan review →
-   decompose → parallel implementation → a three-lane starter review
+   decompose → implementation → shadow integration → a three-lane starter review
    (acceptance, test evidence, simplicity) → finalize. Attach to any agent
    session with `gc session attach <name>`, or inspect the workflow root
    bead as stages record their artifacts.
@@ -75,8 +75,8 @@ Use skill gc.mayor
 | Just an idea | `build-basic` (targeted at a bead) | Full lifecycle from requirements onward. |
 | Approved requirements | `build-from-plan` | Produces plan + plan review, then continues. |
 | Approved requirements, plan, and plan review | `build-from-decompose` | Starts at decomposition. |
-| An implementation convoy | `build-from-convoy` | Drains the convoy, then reviews. |
-| Implementation evidence | `build-from-review` | Review, repair/restart handoff, finalize, publish. |
+| An implementation convoy | `build-from-convoy` | Drains the convoy, assembles one shadow candidate, then reviews it. |
+| Integrated implementation evidence | `build-from-review` | Requires a typed ready integration result, then reviews, repairs/hands off, finalizes, and optionally publishes. |
 | An approved convoy, no build wrapper wanted | `implement` | Direct drain without the review/publish suffix. |
 | A GitHub issue or PR URL | `github-issue-triage`, `github-issue-fix`, `github-pr-review` | Targetless adapters; see GitHub Adapter Workflows below. |
 
@@ -107,6 +107,7 @@ launch or pin them in a rig's `formula_vars`:
 | `review_mode` | `agent` | `report` is read-only findings; `agent` is a structured fix handoff; `interactive` may apply safe fixes directly. |
 | `drain_policy` | `separate` | `separate` runs implementation beads in parallel worker sessions; `same-session` runs them serially in one shared session. |
 | `implementation_target` | `gc.implementation-worker` | The rig role that implements each work item. |
+| `integration_target` | `gc.integration-operator` | The on-demand providerless role that invokes deterministic candidate assembly. |
 | `push` / `open_pr` | `false` | Allow the publish stage to push and open a PR after all checks pass. |
 | `max_iterations` | `10` | Bound on implementation/review fix attempts. |
 
@@ -294,7 +295,8 @@ flowchart TD
     CloseItem --> DrainFanIn["fan in<br/>drain waits for all item roots"]:::infra
     SharedImplement --> DrainFanIn
 
-    DrainFanIn --> Review["review<br/>build-basic implementation review"]:::basic
+    DrainFanIn --> Integrate["integrate<br/>typed manifest + isolated candidate"]:::infra
+    Integrate --> Review["review<br/>build-basic implementation review"]:::basic
 
     subgraph ReviewLoop["post-implementation review loop: build-basic single-lane default"]
         direction TB
@@ -315,7 +317,7 @@ Blue nodes are the base contract or inherited item lifecycle, green nodes are
 the concrete `build-basic` implementation, and amber nodes are Gas City graph,
 convoy, or drain infrastructure. Concrete methodology packs extend the same
 shape: they can override requirements, planning, review fanout, item formulas,
-or finalization while preserving the convoy/drain/fan-in mechanics. The
+or finalization while preserving the convoy/drain/fan-in/integration mechanics. The
 `build-basic` review step is intentionally single-lane; packs such as
 Superpowers, Compound Engineering, and BMAD replace it with expansion formulas
 whose reviewer beads fan out before synthesis.

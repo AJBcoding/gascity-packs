@@ -9,6 +9,7 @@ Validate that implementation evidence exists before review runs:
 - plan_review_path: {{plan_review_path}}
 - decomposition_path: {{decomposition_path}}
 - implementation_summary_path: {{implementation_summary_path}}
+- integration_result_path: {{integration_result_path}}
 - code_review_formula: {{code_review_formula}}
 - review_fix_formula: {{review_fix_formula}}
 - implementation_formula: {{implementation_formula}}
@@ -19,9 +20,14 @@ Validate that implementation evidence exists before review runs:
 - max_iterations: {{max_iterations}}
 
 If this suffix is launched directly, require explicit implementation evidence
-or a root metadata pointer to it. If this step is reached from
-`build-from-convoy-base`, consume the implementation summary recorded by the
-implementation suffix. Do not run implementation work from this step.
+and a typed integration result, or root metadata pointers to both. Resolve an
+empty integration result path from `gc.build.integration_result_path`, then
+`{{artifact_root}}/integration-result.md`. Validate it as
+`gc.build.integration-result.v1`, require outcome `ready`, and record the exact
+path/hash/candidate/tree on the workflow root. If this step is reached from
+`build-from-convoy-base`, consume the result recorded by its integration
+suffix. Never review disconnected source-worktree heads. Do not run
+implementation work from this step.
 
 Close only after the review subject, evidence paths, selected review/fix
 formulas, modes, and max iteration limit are recorded on the workflow root.

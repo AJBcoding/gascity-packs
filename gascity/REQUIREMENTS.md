@@ -20,7 +20,7 @@ and artifact-facing behaviors unless this ledger is intentionally updated.
 Gas City needs one approachable default factory and one stable base contract.
 New users should be able to run `build-basic` and see the whole software-factory
 lifecycle: requirements, plan, plan review, decomposition, implementation,
-review, fix loop, final report, and optional publish. Methodology pack authors
+integration, review, fix loop, final report, and optional publish. Methodology pack authors
 should be able to map upstream frameworks into Gas City without changing the
 experience users expect from the raw framework.
 
@@ -46,7 +46,7 @@ For every base-pack formula, prompt asset, adapter, or public override change:
 
 - **Base anchor** - A mandatory lifecycle stage in `build-base`: `prepare`,
   `requirements`, `plan`, `plan-review`, `decompose`, implementation,
-  `review`, `finalize`, and `publish`.
+  `integrate`, `review`, `finalize`, and `publish`.
 - **Base formula** - A formula in this pack that defines reusable methodology
   behavior or an adapter surface.
 - **Build-basic** - The beginner-friendly reference implementation of
@@ -140,6 +140,7 @@ paths.
 | `decompose` | Produces durable work units and records implementation convoy identity on root metadata. |
 | `implement` | Executes the selected implementation strategy and writes per-item or explicitly mapped implementation evidence. |
 | `implement-same-session` | Executes the selected same-session implementation strategy, preserving shared context and item traceability. |
+| `integrate` | Produces a typed source manifest, assembles and verifies one isolated shadow candidate, and records immutable candidate/tree evidence before review. |
 | `review` | Produces a review verdict/report with required fixes or approval. |
 | `finalize` | Writes the final workflow report covering requirements, plan, decomposition, implementation, review attempts, risk, drift, publish status, and next action. |
 | `publish` | No-ops unless authorized. When authorized, records push and PR status or a blocked publish reason. |
@@ -183,6 +184,8 @@ The base artifact layout is stable:
 | Implementation plan | `<artifact_root>/implementation-plan.md` |
 | Decomposition | `<artifact_root>/decomposition.md` |
 | Implementation summary | `<artifact_root>/implementation-summary.md` |
+| Integration manifest | `<artifact_root>/integration-manifest.md` |
+| Integration result | `<artifact_root>/integration-result.md` |
 | Review report | `<artifact_root>/reviews/attempt-<n>/report.md` |
 | Review fixes | `<artifact_root>/reviews/attempt-<n>/fixes.md` |
 | Final report | `<artifact_root>/final-report.md` |
@@ -199,6 +202,8 @@ for formula checks. Base schemas are expected at stable paths:
 | `gc.build.plan.v1` | `gascity/schemas/build/plan.v1.yaml` |
 | `gc.build.decomposition.v1` | `gascity/schemas/build/decomposition.v1.yaml` |
 | `gc.build.implementation-summary.v1` | `gascity/schemas/build/implementation-summary.v1.yaml` |
+| `gc.build.integration-manifest.v1` | `gascity/schemas/build/integration-manifest.v1.yaml` |
+| `gc.build.integration-result.v1` | `gascity/schemas/build/integration-result.v1.yaml` |
 | `gc.build.review.v1` | `gascity/schemas/build/review.v1.yaml` |
 | `gc.build.final-report.v1` | `gascity/schemas/build/final-report.v1.yaml` |
 
@@ -531,8 +536,8 @@ Continuation bases are nested suffixes:
 | `build-from-requirements-base` | initial requirements context | produce or reuse requirements | `build-from-plan-base` |
 | `build-from-plan-base` | approved requirements | produce plan and plan-review | `build-from-decompose-base` |
 | `build-from-decompose-base` | approved requirements, plan, and plan-review | create or adopt implementation convoy | `build-from-convoy-base` |
-| `build-from-convoy-base` | implementation convoy | drain implementation work and record evidence | `build-from-review-base` |
-| `build-from-review-base` | implementation evidence | review, repair or restart handoff, finalize, optionally publish | terminal |
+| `build-from-convoy-base` | implementation convoy | drain implementation work and assemble one typed shadow candidate | `build-from-review-base` |
+| `build-from-review-base` | typed ready integration result | review, repair or restart handoff, finalize, optionally publish | terminal |
 
 Each suffix may be launched directly when its prerequisite inputs already
 exist. A suffix must not silently rerun skipped upstream stages. Concrete
@@ -816,15 +821,16 @@ Proof expectation: validation requires `workflow.formula`, `producer.formula`,
 | GC-METH-BR-051 | GC-METH-US-001 | WHEN prerequisite inputs already exist for a build stage, THE base pack SHALL provide reusable `build-from-*-base` continuation suffixes that validate those prerequisites, perform only their owned stage or handoff, and delegate to the next suffix without silently rerunning skipped upstream stages. |
 | GC-METH-BR-052 | GC-METH-US-002 | WHEN a methodology pack needs a continuation entrypoint, THE pack SHOULD extend the matching `build-from-*-base` suffix and override selectors, routes, drain formulas, or review expansions instead of copying the suffix graph. |
 | GC-METH-BR-053 | GC-METH-US-001 | WHEN a user wants the built-in Gas City continuation behavior, THE base pack SHALL provide cataloged `build-from-*` wrappers that extend the matching suffix bases. |
+| GC-METH-BR-054 | GC-METH-US-001 | WHEN implementation drains complete, THE build and convoy-continuation paths SHALL assemble and validate one typed shadow candidate before any review stage; a review-only continuation SHALL require an existing typed ready integration result. |
 
 ## Scenario Ledger
 
 | ID | Scenario | Required behavior | Evidence |
 | --- | --- | --- | --- |
-| GC-METH-001 | Base stage sequence | `build-base` defines the stable stage sequence `prepare -> requirements -> plan -> plan-review -> decompose -> implementation -> review -> finalize -> publish`. | `formulas/build-base.formula.toml`; `tests/test_formula_assets.py::FormulaAssetTests::test_build_base_is_full_lifecycle_virtual_contract` |
+| GC-METH-001 | Base stage sequence | `build-base` defines the stable stage sequence `prepare -> requirements -> plan -> plan-review -> decompose -> implementation -> integrate -> review -> finalize -> publish`. | `formulas/build-base.formula.toml`; `tests/test_formula_assets.py::FormulaAssetTests::test_build_base_is_full_lifecycle_virtual_contract` |
 | GC-METH-002 | Default implementation | `build-basic` extends `build-base`, is cataloged, preserves the base stage sequence, uses beginner-friendly prompts, and uses starter review fanout through `build-basic-review`. | `formulas/build-basic.formula.toml`; `formulas/build-basic-review.formula.toml`; `tests/test_formula_assets.py::FormulaAssetTests::test_build_basic_extends_full_lifecycle_base` |
 | GC-METH-003 | Stage selector compatibility | `build-base`, `github-issue-fix-base`, and `github-pr-review` expose methodology selector vars with defaults that point at the base implementation. | `tests/test_formula_assets.py::FormulaAssetTests::test_entrypoint_adapters_expose_methodology_formula_vars` |
-| GC-METH-004 | Virtual stage contracts | `planning-base`, `decomposition-base`, `implementation-base`, `implementation-item-base`, `code-review-base`, and `fix-loop-base` are internal, non-catalog base contracts with shadowable step assets. | `tests/test_formula_assets.py::FormulaAssetTests::test_methodology_stage_contracts_are_virtual_and_shadowable` |
+| GC-METH-004 | Virtual stage contracts | `planning-base`, `decomposition-base`, `implementation-base`, `implementation-item-base`, `integration-base`, `code-review-base`, and `fix-loop-base` are internal, non-catalog base contracts with shadowable step assets. | `tests/test_formula_assets.py::FormulaAssetTests::test_methodology_stage_contracts_are_virtual_and_shadowable` |
 | GC-METH-005 | Requirements artifact shape | Requirements artifacts include the base sections, stable `SHALL` behavior requirements, example mapping, acceptance criteria, out-of-scope, and open questions. | `assets/workflows/build-basic/requirements.md`; this ledger |
 | GC-METH-006 | Traceability and drift | Downstream artifacts carry upstream paths and hashes, and review/finalization surface drift. | this ledger; future schema/gate tests |
 | GC-METH-007 | Review/fix loop | Review verdicts drive fix-loop iterations and per-attempt report/fix artifacts until approval, block, or maximum iterations. | `formulas/build-basic-review.formula.toml`; `formulas/fix-loop-base.formula.toml` |

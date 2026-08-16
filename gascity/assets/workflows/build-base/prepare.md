@@ -18,6 +18,8 @@ Launch inputs:
 - decomposition_formula: {{decomposition_formula}}
 - implementation_formula: {{implementation_formula}}
 - implementation_item_formula: {{implementation_item_formula}}
+- integration_formula: {{integration_formula}}
+- integration_target: {{integration_target}}
 - code_review_formula: {{code_review_formula}}
 - review_fix_formula: {{review_fix_formula}}
 - max_iterations: {{max_iterations}}
@@ -59,12 +61,15 @@ path input is blank, derive these canonical filenames under the artifact root:
 - `implementation-plan.md` for `gc.build.plan_path`
 - `decomposition.md` for `gc.build.decomposition_path`
 - `implementation-summary.md` for `gc.build.implementation_summary_path`
+- `integration-manifest.md` for `gc.build.integration_manifest_path`
+- `integration-result.md` for `gc.build.integration_result_path`
 - `review-report.md` for `gc.build.review_report_path`
 - `factory-run.md` for `gc.build.final_report_path`
 
 Resolved artifact path keys recorded on the workflow root are
 `gc.build.requirements_path`, `gc.build.plan_path`,
 `gc.build.decomposition_path`, `gc.build.implementation_summary_path`,
+`gc.build.integration_manifest_path`, `gc.build.integration_result_path`,
 `gc.build.review_report_path`, and `gc.build.final_report_path`. Producer-stage
 validation gates read these keys, so record every derived path even when the
 matching launch input was blank.

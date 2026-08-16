@@ -28,6 +28,13 @@ anchor boundary, run sandboxed verification from inside the worktree, and make a
 focused commit in the worktree. Leave the source anchor open for
 `close-source-anchor`; close only this implementation step when done.
 
+Before editing, require `gc.work_base_commit` on the source anchor and verify it
+is an ancestor of worktree `HEAD`. After the focused commit and final proof
+pass, persist the exact 40-character `HEAD` on the source anchor as
+`gc.work_commit`. This always means the source-worktree result commit; never
+replace it with an integrated, published, or landed commit. Read both commit
+fields back before closing this step.
+
 Write or update the task summary with these schema-required body sections,
 using the exact `##` headings below in this order:
 
