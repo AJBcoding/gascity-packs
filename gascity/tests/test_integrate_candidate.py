@@ -315,6 +315,49 @@ class IntegrateCandidateTests(unittest.TestCase):
             )
             self.assertEqual(artifact.front_matter["integration"]["verification"][0]["argv"], argv)
 
+    def test_shared_worktree_accepts_historical_item_commits_in_dependency_order(self) -> None:
+        module = load_integrator_module()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fixture = IntegrationRepositoryFixture(pathlib.Path(temp_dir))
+            git(fixture.source_a, "reset", "--hard", fixture.base_sha)
+            (fixture.source_a / "first.txt").write_text("first\n", encoding="utf-8")
+            git(fixture.source_a, "add", "first.txt")
+            git(fixture.source_a, "commit", "-m", "shared item one")
+            first_sha = git(fixture.source_a, "rev-parse", "HEAD").stdout.strip()
+            (fixture.source_a / "second.txt").write_text("second\n", encoding="utf-8")
+            git(fixture.source_a, "add", "second.txt")
+            git(fixture.source_a, "commit", "-m", "shared item two")
+            second_sha = git(fixture.source_a, "rev-parse", "HEAD").stdout.strip()
+
+            first = fixture.source_record(
+                "task-a", fixture.source_a, first_sha, [], ["first.txt"]
+            )
+            second = fixture.source_record(
+                "task-b", fixture.source_a, second_sha, ["task-a"], ["second.txt"]
+            )
+            second["base_sha"] = first_sha
+            verification = [[
+                sys.executable,
+                "-c",
+                "from pathlib import Path; assert Path('first.txt').read_text() == 'first\\n'; assert Path('second.txt').read_text() == 'second\\n'",
+            ]]
+            manifest = fixture.write_manifest(sources=[second, first], verification=verification)
+            result = fixture.artifact_root / "integration-result.md"
+
+            self.assertEqual(
+                module.main(["assemble", "--manifest", str(manifest), "--result", str(result)]),
+                0,
+            )
+            artifact = validate_build_artifact.validate_artifact_text(
+                result.read_text(encoding="utf-8"), expected_schema="gc.build.integration-result.v1"
+            )
+            integration = artifact.front_matter["integration"]
+            self.assertEqual([row["bead_id"] for row in integration["source_map"]], ["task-a", "task-b"])
+            scratch = pathlib.Path(integration["scratch_worktree"])
+            self.assertEqual((scratch / "first.txt").read_text(encoding="utf-8"), "first\n")
+            self.assertEqual((scratch / "second.txt").read_text(encoding="utf-8"), "second\n")
+
     def test_existing_result_is_never_overwritten(self) -> None:
         module = load_integrator_module()
 

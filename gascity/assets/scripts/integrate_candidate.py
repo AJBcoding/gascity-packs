@@ -122,8 +122,20 @@ def verify_manifest_provenance(manifest: IntegrationManifest, result_path: Path)
         worktree_top = Path(run_git(worktree, "rev-parse", "--show-toplevel").stdout.strip()).resolve()
         if worktree_top != worktree:
             raise IntegrationError(f"source {source.bead_id} worktree must be a Git top level")
-        if run_git(worktree, "rev-parse", "HEAD").stdout.strip() != source.result_sha:
-            raise IntegrationError(f"source {source.bead_id} result_sha does not match worktree HEAD")
+        worktree_head = run_git(worktree, "rev-parse", "HEAD").stdout.strip()
+        if source.result_sha == source.base_sha:
+            raise IntegrationError(
+                f"source {source.bead_id} result_sha does not match worktree HEAD provenance: it equals base_sha"
+            )
+        if run_git(
+            worktree,
+            "merge-base",
+            "--is-ancestor",
+            source.result_sha,
+            worktree_head,
+            check=False,
+        ).returncode != 0:
+            raise IntegrationError(f"source {source.bead_id} result_sha is not reachable from worktree HEAD")
         if run_git(worktree, "merge-base", "--is-ancestor", source.base_sha, source.result_sha, check=False).returncode != 0:
             raise IntegrationError(f"source {source.bead_id} result_sha does not descend from base_sha")
         run_git(repository, "cat-file", "-e", f"{source.result_sha}^{{commit}}")
