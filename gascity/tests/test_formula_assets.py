@@ -755,6 +755,65 @@ def write_check_gc_stub(bin_dir: pathlib.Path, *, parent_show: bool = False) -> 
 
 
 class FormulaAssetTests(unittest.TestCase):
+    def test_requirements_and_readme_define_verified_publication_states(self) -> None:
+        root = pathlib.Path(__file__).resolve().parents[1]
+        requirements = (root / "REQUIREMENTS.md").read_text(encoding="utf-8")
+        formula_requirements = (root / "formulas/REQUIREMENTS.md").read_text(encoding="utf-8")
+        readme = (root / "README.md").read_text(encoding="utf-8")
+
+        for fragment in (
+            "direct: `published` + `landed` + `gcl-` event",
+            "pull request: `published` + `pending_external_merge` + no landing event",
+            "disabled: `noop` + `not_requested`",
+            "post-push verification failure: `publication_pending` + `verification_failed`",
+            "record_landing.py",
+            "gc landing record",
+        ):
+            with self.subTest(document="requirements", fragment=fragment):
+                self.assertIn(fragment, requirements)
+
+        for fragment in ("GC-BF-018", "record_landing.py", "gc landing record"):
+            with self.subTest(document="formula requirements", fragment=fragment):
+                self.assertIn(fragment, formula_requirements)
+
+        for fragment in (
+            "integrate -> review -> finalize -> authorized publish -> verified landing",
+            "ephemeral publisher",
+            "pending_external_merge",
+            "does not produce a typed integration result",
+            "legacy and non-qualifying",
+        ):
+            with self.subTest(document="README", fragment=fragment):
+                self.assertIn(fragment, readme)
+
+    def test_build_publish_surfaces_require_verified_landing_contract(self) -> None:
+        packs_root = pathlib.Path(__file__).resolve().parents[2]
+        surfaces = {
+            "build-base": packs_root / "gascity/assets/workflows/build-base/publish.md",
+            "build-basic": packs_root / "gascity/assets/workflows/build-basic/publish.md",
+            "build-from-review-base": packs_root / "gascity/assets/workflows/build-from-review-base/publish.md",
+            "gstack-build": packs_root / "gstack/assets/workflows/gstack-build/publish.md",
+        }
+        required = (
+            "gc.build.integration_result_path",
+            ".gc/scripts/record_landing.py record-direct",
+            "gc landing record",
+            "gc.build.landing_status=landed",
+            "gc.build.landing_event_id",
+            "gc.build.landed_sha",
+            "gc.build.landing_receipt_path",
+            "gc.build.landing_status=pending_external_merge",
+            "Opening a PR is published, not landed",
+        )
+        for name, path in surfaces.items():
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(surface=name):
+                for fragment in required:
+                    self.assertIn(fragment, text)
+                self.assertLess(text.index("force-with-lease"), text.index("record_landing.py record-direct"))
+                self.assertIn("must not invoke `record_landing.py`", text)
+                self.assertIn("must not emit `delivery.landed`", text)
+
     def test_expected_formula_set_is_convoy_first(self) -> None:
         root = pathlib.Path(__file__).resolve().parents[1]
         paths = sorted((root / "formulas").glob("*.formula.toml"))

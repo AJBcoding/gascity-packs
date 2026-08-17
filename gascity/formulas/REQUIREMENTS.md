@@ -129,7 +129,7 @@ this ledger against the `FORMULAS` constant and formula directory.
 
 | ID | Formula | Type | Required behavior | Evidence |
 | --- | --- | --- | --- | --- |
-| GC-BF-001 | `build-base` | Virtual targeted full-lifecycle contract | Defines the stable build sequence including typed ephemeral integration before review, selector and mode variables, methodology metadata, implementation strategy, artifact repair gates, review/fix, finalization, and optional publication contract that concrete methodology packs extend. | `build-base.formula.toml`; `../tests/test_formula_assets.py` |
+| GC-BF-001 | `build-base` | Virtual targeted full-lifecycle contract | Defines the stable build sequence including typed ephemeral integration before review, selector and mode variables, methodology metadata, implementation strategy, artifact repair gates, review/fix, finalization, and verified publication states that concrete methodology packs extend. | `build-base.formula.toml`; `../tests/test_formula_assets.py` |
 | GC-BF-002 | `planning-base` | Virtual targetless planning contract | Produces approved requirements and implementation-plan artifacts through prepare, requirements, plan, and plan-review stages while preserving strict artifact shape, approval states, hashes, coverage, validator repair, and mode behavior for adapters. | `planning-base.formula.toml`; `../tests/test_formula_assets.py` |
 | GC-BF-003 | `decomposition-base` | Virtual targetless decomposition contract | Converts an approved plan into durable work units and implementation convoy identity that downstream drain or convoy-step implementation strategies consume, after validating decomposition schema, coverage, and upstream hashes. | `decomposition-base.formula.toml`; `../tests/test_formula_assets.py` |
 | GC-BF-004 | `implementation-base` | Virtual targeted implementation contract | Executes one implementation source anchor with prepare-worktree, implement, and close-source-anchor stages while preserving source-anchor close, work-item evidence, requirement coverage, and neutral producer metadata. | `implementation-base.formula.toml`; `../tests/test_formula_assets.py` |
@@ -165,7 +165,7 @@ this ledger against the `FORMULAS` constant and formula directory.
 
 | ID | Formula | Type | Required behavior | Evidence |
 | --- | --- | --- | --- | --- |
-| GC-BF-010 | `implement` | Cataloged targeted implementation entrypoint | Validates the input convoy, drains implementation work using an allowed policy, waits for completion, writes validated item-mapped implementation summary evidence, and optionally delegates publishing. | `implement.formula.toml`; `../tests/test_formula_assets.py` |
+| GC-BF-010 | `implement` | Cataloged targeted implementation entrypoint | Validates the input convoy, drains implementation work using an allowed policy, waits for completion, and writes validated item-mapped implementation summary evidence. It does not produce a typed integration result, so its legacy optional push is non-qualifying and cannot claim landed or shipped. | `implement.formula.toml`; `../tests/test_formula_assets.py` |
 | GC-BF-011 | `do-work` | Targeted implementation item helper | Extends `implementation-base`, prepares one item worktree, implements owned work with the selected implementation target, and closes the source anchor after implementation succeeds. | `do-work.formula.toml`; `../tests/test_formula_assets.py` |
 | GC-BF-012 | `do-work-item` | Targeted shared-drain item helper | Extends `implementation-item-base`, runs exactly one shared-drain item with the selected implementation target, and stays internal/single-lane. | `do-work-item.formula.toml`; `../tests/test_formula_assets.py` |
 | GC-BF-013 | `same-session-implement` | Targeted internal shared-drain helper | Documents and executes the pack-facing same-session policy by draining through `do-work-item` with exclusive member access and single-lane sequencing. | `same-session-implement.formula.toml`; `../tests/test_formula_assets.py` |
@@ -183,7 +183,7 @@ this ledger against the `FORMULAS` constant and formula directory.
 | ID | Formula | Type | Required behavior | Evidence |
 | --- | --- | --- | --- | --- |
 | GC-BF-017 | `design-review` | Cataloged targeted design review | Reviews and finalizes a design document through a body scope and cleanup finalizer while preserving notification semantics. | `design-review.formula.toml`; `../tests/test_formula_assets.py` |
-| GC-BF-018 | `publish` | Targetless internal publication helper | Runs publish preflight, no-ops when push/PR authorization is absent, pushes only with positive authorization, and opens a PR only with positive authorization after push behavior is resolved. | `publish.formula.toml`; `../tests/test_formula_assets.py` |
+| GC-BF-018 | `publish` | Targetless internal publication helper | Runs preflight and authorized publication only. Direct mode uses the typed integration result and expected-object lease, then delegates exact remote observation and typed event creation through `record_landing.py` to core `gc landing record`; PR mode records `pending_external_merge`, and disabled mode records `not_requested`. | `publish.formula.toml`; `../assets/scripts/record_landing.py`; `../tests/test_record_landing.py`; `../tests/test_formula_assets.py` |
 
 ### GitHub Adapters
 

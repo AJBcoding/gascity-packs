@@ -152,6 +152,18 @@ def pack_methodology_metadata(pack_name: str, expected: dict) -> dict:
 
 
 class DerivedPackCompatibilityTests(unittest.TestCase):
+    def test_gstack_publish_override_preserves_verified_landing_boundary(self) -> None:
+        text = (PACKS_ROOT / "gstack/assets/workflows/gstack-build/publish.md").read_text(encoding="utf-8")
+        for fragment in (
+            "gc.build.integration_result_path",
+            ".gc/scripts/record_landing.py record-direct",
+            "gc.build.landing_status=landed",
+            "gc.build.landing_status=pending_external_merge",
+            "Opening a PR is published, not landed",
+        ):
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, text)
+
     maxDiff = None
 
     def test_implementation_overrides_record_source_commit_provenance(self) -> None:

@@ -2,8 +2,8 @@
 
 This is the base pack for running full software-delivery workflows in Gas
 City: gather requirements, write and review a plan, decompose into tasks,
-implement in agent sessions, assemble one shadow candidate, review that candidate, and optionally
-publish. It ships three things:
+implement in agent sessions, assemble one shadow candidate, review that candidate,
+and optionally publish with verified landing evidence. It ships three things:
 
 - **Workflow formulas** — `build-basic` (the starter factory), the
   `build-from-*` continuation entrypoints, direct `implement`, and GitHub
@@ -55,7 +55,8 @@ and your project added as a rig (`gc rig add .` inside the repo). See the
 
 3. Watch it run. The workflow walks requirements → plan → plan review →
    decompose → implementation → shadow integration → a three-lane starter review
-   (acceptance, test evidence, simplicity) → finalize. Attach to any agent
+   (acceptance, test evidence, simplicity) → finalize → authorized publication →
+   verified landing when direct publication is enabled. Attach to any agent
    session with `gc session attach <name>`, or inspect the workflow root
    bead as stages record their artifacts.
 
@@ -110,7 +111,7 @@ launch or pin them in a rig's `formula_vars`:
 | `drain_policy` | `separate` | `separate` runs implementation beads in parallel worker sessions; `same-session` runs them serially in one shared session. |
 | `implementation_target` | `gc.implementation-worker` | The rig role that implements each work item. |
 | `integration_target` | `gc.integration-operator` | The on-demand providerless role that invokes deterministic candidate assembly. |
-| `push` / `open_pr` | `false` | Allow the publish stage to push and open a PR after all checks pass. |
+| `push` / `open_pr` | `false` | Select disabled, direct, or PR publication after all checks pass. Direct mode requires verified landing; opening a PR remains pending external merge. |
 | `max_iterations` | `10` | Bound on implementation/review fix attempts. |
 
 When variables are not enough, every stage prompt can be replaced by dropping
@@ -178,8 +179,22 @@ stable stage sequence that concrete build methodology packs can override:
 
 ```text
 prepare -> requirements -> plan -> plan-review -> decompose ->
-implement | implement-same-session -> review -> finalize -> publish
+implement | implement-same-session -> integrate -> review -> finalize -> publish
 ```
+
+The healthy delivery suffix is:
+
+```text
+integrate -> review -> finalize -> authorized publish -> verified landing
+```
+
+Integration and publication are on-demand capabilities: an isolated integrator
+assembles immutable candidate evidence, then an ephemeral publisher acts only
+when authorized. There is no long-lived refinery role in this topology. Direct
+mode is complete only after core returns a `gcl-` event for the independently
+observed target. PR mode records `pending_external_merge` and waits for a trusted
+merge observer. Neither path stamps or closes source work as shipped in this
+phase.
 
 `build-base` is internal and should not be launched directly. Use
 `build-basic` for the default Gas City implementation. It maps the base stages
@@ -644,6 +659,10 @@ finalize may run; fail means the workflow records actionable blocking findings.
 Use this when launching implementation directly against an approved convoy
 without the full build loop.
 
+This entrypoint does not produce a typed integration result. Its existing
+optional push behavior is legacy and non-qualifying: it cannot claim a landed
+or shipped outcome until a separate integration handoff is supplied.
+
 Stable basic override:
 `assets/workflows/implement/prepare.md`
 
@@ -874,6 +893,13 @@ The expansion should still produce the review artifact consumed by
 Use this when publishing needs local branch, PR title, protected-branch, or
 release policy.
 
+Any replacement must preserve the publication boundary. Direct publication
+uses the approved integration candidate and recorded base in an expected-object
+lease, then invokes `.gc/scripts/record_landing.py record-direct`; only a
+successful core `gc landing record` response is landed. Opening a PR is
+published but remains `pending_external_merge`, and disabled publication is a
+successful `not_requested` no-op.
+
 Stable basic override:
 `assets/workflows/publish/preflight.md`
 
@@ -910,8 +936,9 @@ metadata = { "gc.run_target" = "gc.publisher" }
 ```
 
 The replacement can open a PR, create a release-train ticket, or request human
-approval, but it must leave a durable final report path and terminal publish
-status for the caller.
+approval, but it must leave a durable final report path and mode-specific
+publish/landing status for the caller. A release-train handoff must not claim a
+landing event before a trusted observer supplies the actual landed SHA.
 
 By default artifacts go under the target rig:
 

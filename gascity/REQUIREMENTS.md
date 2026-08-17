@@ -20,7 +20,8 @@ and artifact-facing behaviors unless this ledger is intentionally updated.
 Gas City needs one approachable default factory and one stable base contract.
 New users should be able to run `build-basic` and see the whole software-factory
 lifecycle: requirements, plan, plan review, decomposition, implementation,
-integration, review, fix loop, final report, and optional publish. Methodology pack authors
+integration, review, fix loop, final report, authorized publication, and verified
+landing. Methodology pack authors
 should be able to map upstream frameworks into Gas City without changing the
 experience users expect from the raw framework.
 
@@ -124,6 +125,10 @@ top-level stages only as anchored extensions:
   produces exactly one work item.
 - Publishing and external side effects are opt-in through explicit variables or
   gated adapter steps.
+- Integration and publication are ephemeral workflow capabilities, not
+  long-lived refinery actors. The integration stage prepares immutable evidence;
+  the publisher applies explicit authorization; core independently observes the
+  target before recording landing.
 
 ## Base Stage Artifact Contracts
 
@@ -143,7 +148,14 @@ paths.
 | `integrate` | Produces a typed source manifest, assembles and verifies one isolated shadow candidate, and records immutable candidate/tree evidence before review. |
 | `review` | Produces a review verdict/report with required fixes or approval. |
 | `finalize` | Writes the final workflow report covering requirements, plan, decomposition, implementation, review attempts, risk, drift, publish status, and next action. |
-| `publish` | No-ops unless authorized. When authorized, records push and PR status or a blocked publish reason. |
+| `publish` | No-ops unless authorized. Direct mode publishes with an expected-object lease and requires `record_landing.py` to obtain a verified `gc landing record` event; PR mode records a pending external merge without claiming landing. |
+
+The terminal publication-state contract is:
+
+- direct: `published` + `landed` + `gcl-` event;
+- pull request: `published` + `pending_external_merge` + no landing event;
+- disabled: `noop` + `not_requested`;
+- post-push verification failure: `publication_pending` + `verification_failed`.
 
 ## Requirements Artifact Contract
 
@@ -186,6 +198,7 @@ The base artifact layout is stable:
 | Implementation summary | `<artifact_root>/implementation-summary.md` |
 | Integration manifest | `<artifact_root>/integration-manifest.md` |
 | Integration result | `<artifact_root>/integration-result.md` |
+| Landing receipt | `<artifact_root>/landing-receipt.json` |
 | Review report | `<artifact_root>/reviews/attempt-<n>/report.md` |
 | Review fixes | `<artifact_root>/reviews/attempt-<n>/fixes.md` |
 | Final report | `<artifact_root>/final-report.md` |
@@ -781,8 +794,10 @@ Proof expectation: validation requires `workflow.formula`, `producer.formula`,
 | GC-METH-BR-012 | GC-METH-US-001 | WHEN review completes, THE workflow SHALL write a review report with an `approved`, `changes_required`, or `blocked` verdict. |
 | GC-METH-BR-013 | GC-METH-US-001 | IF review returns `changes_required`, THEN THE workflow SHALL run the selected review-fix formula and repeat review/fix until approval, block, or maximum iteration termination. |
 | GC-METH-BR-014 | GC-METH-US-001 | WHEN the workflow finalizes, THE final report SHALL summarize requirements, plan, decomposition, implementation, review attempts, fixes, drift, risk, publish status, and next action. |
-| GC-METH-BR-015 | GC-METH-US-001 | WHEN publish is not explicitly authorized, THE publish stage SHALL no-op and record `not_published`. |
-| GC-METH-BR-016 | GC-METH-US-001 | WHEN publish is authorized, THE publish stage SHALL record push status, PR status, or a blocked publish reason. |
+| GC-METH-BR-015 | GC-METH-US-001 | WHEN publish is not explicitly authorized, THE publish stage SHALL record `gc.build.publish_status=noop` and `gc.build.landing_status=not_requested` without changing the build outcome. |
+| GC-METH-BR-016 | GC-METH-US-001 | WHEN publish is authorized, THE publish stage SHALL record the mode-specific push or PR status; direct publication SHALL use the typed ready integration result and an expected-object lease and SHALL complete only after `record_landing.py` obtains a successful `gc landing record` event, while PR publication SHALL remain `pending_external_merge`. |
+| GC-METH-BR-055 | GC-METH-US-001 | IF direct publication updates the target but landing observation fails, THEN the publish stage SHALL record `publication_pending` plus `verification_failed`, preserve the integration result and exact receipt, and retry only with the byte-identical receipt so core re-observes the remote. |
+| GC-METH-BR-056 | GC-METH-US-001 | WHEN a pull request is opened, THE publish stage SHALL treat it as published but not landed and SHALL NOT create a landing receipt, emit `delivery.landed`, set a landed SHA, or close shipped work before a trusted external merge observer supplies the actual landed SHA. |
 | GC-METH-BR-051 | GC-METH-US-001 | IF review/fix cannot reach approval because evidence is missing, a drain failed, review is blocked, report mode forbids mutation, or maximum iterations are exhausted, THEN finalization SHALL record a failing blocked outcome plus `gc.build.repair_status` and `gc.restart.*` metadata rather than closing the workflow as pass; publish no-op SHALL preserve that outcome. |
 | GC-METH-BR-017 | GC-METH-TS-003 | WHEN a downstream artifact consumes an upstream artifact, THE downstream artifact SHALL record the upstream path and content hash or revision ID. |
 | GC-METH-BR-018 | GC-METH-TS-003 | IF upstream artifacts drift after downstream work starts, THEN review and finalization SHALL surface drift and SHALL NOT silently proceed. |
@@ -843,6 +858,7 @@ Proof expectation: validation requires `workflow.formula`, `producer.formula`,
 | GC-METH-014 | Coverage matrix consistency | YAML coverage is authoritative, markdown coverage mirrors IDs/statuses, and all non-covered statuses include rationale. | this ledger; future schema/gate tests |
 | GC-METH-015 | Neutral artifact metadata | Artifacts record workflow, methodology, and producer metadata without owner or role fields. | this ledger; future schema/gate tests |
 | GC-METH-016 | Nested continuation suffixes | `build-from-requirements-base -> build-from-plan-base -> build-from-decompose-base -> build-from-convoy-base -> build-from-review-base` form a nested suffix chain. Each suffix validates its prerequisite, performs its owned work, and hands off to the next suffix. Cataloged `build-from-*` wrappers expose the default Gas City behavior. | `formulas/build-from-*-base.formula.toml`; `formulas/build-from-*.formula.toml`; `tests/test_formula_assets.py::FormulaAssetTests::test_build_continuation_bases_form_nested_suffix_chain`; `tests/test_formula_assets.py::FormulaAssetTests::test_default_continuation_entrypoints_extend_suffix_bases` |
+| GC-METH-017 | Verified publication | An ephemeral publisher maps direct, PR, disabled, and post-push-failure modes to distinct landing states; only exact core observation of an approved candidate produces a `gcl-` landing event. | `assets/workflows/build-base/publish.md`; `assets/scripts/record_landing.py`; `tests/test_record_landing.py`; `tests/test_formula_assets.py::FormulaAssetTests::test_build_publish_surfaces_require_verified_landing_contract` |
 
 ## Deferred Follow-Up Requirements
 
