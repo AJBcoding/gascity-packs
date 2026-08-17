@@ -21,3 +21,7 @@ On success record `gc.build.landing_status=landed`,
 `gc.build.publish_status=publication_pending` and
 `gc.build.landing_status=verification_failed`, preserve the exact receipt, and
 leave the step recoverable for identical replay.
+
+Do not invoke `gc landing stamp` here. The formula's dependent
+`stamp-work-records` step starts only after the publication path has recorded
+its truthful landing state.

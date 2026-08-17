@@ -45,3 +45,7 @@ that transition.
 
 When both controls are false, retain the successful no-op and also record
 `gc.build.landing_status=not_requested`.
+
+Do not invoke `gc landing stamp` from this publish step. Close publication only
+after its truthful mode-specific landing state is recorded; the inherited
+`stamp-work-records` step owns post-landing stamping and replay.

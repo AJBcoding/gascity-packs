@@ -9,3 +9,6 @@ Opening a PR is published, not landed. Record
 `record_landing.py`, create a landing receipt, set a landing event ID or landed
 SHA, or emit `delivery.landed`. A later trusted external merge observer must
 observe and supply the actual landed SHA.
+
+Do not invoke `gc landing stamp` here. The dependent `stamp-work-records` step
+will no-op because this path records no landing event ID.

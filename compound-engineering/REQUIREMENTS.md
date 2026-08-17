@@ -18,11 +18,13 @@ for every derived pack.
 - Formula contract: `compound-engineering/formulas/compound-build.formula.toml`
   declares `extends = ["build-base"]` and preserves the inherited anchor order
   `prepare -> requirements -> plan -> plan-review -> decompose ->
-  implement/implement-same-session -> review -> finalize -> publish`. The child
-  overrides `requirements`, `plan`, `plan-review`, `implement`,
-  `implement-same-session`, `review`, and `finalize` under their base ids in
-  the base sequence; `prepare`, `decompose`, and `publish` remain inherited.
-  No anchor is renamed, skipped, or reordered.
+  implement/implement-same-session -> review -> finalize -> publish ->
+  stamp-work-records`. The child overrides `requirements`, `plan`,
+  `plan-review`, `implement`, `implement-same-session`, `review`, and
+  `finalize` under their base ids in the base sequence; `prepare`, `decompose`,
+  `publish`, and `stamp-work-records` remain inherited. The inherited stamp step stays after
+  publication and consumes only an exact landing event ID. No anchor is
+  renamed, skipped, or reordered.
 - Methodology selectors: the pack ships one derived formula per base
   methodology contract, each declared with `extends` on the matching base:
   `compound-planning` (`planning-base`), `compound-decomposition`

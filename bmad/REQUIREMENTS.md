@@ -18,11 +18,14 @@ for every derived pack.
 - Formula contract: `bmad/formulas/bmad-build.formula.toml` declares
   `extends = ["build-base"]` and preserves the inherited anchor order
   `prepare -> requirements -> plan -> plan-review -> decompose ->
-  implement/implement-same-session -> review -> finalize -> publish`. The
+  implement/implement-same-session -> review -> finalize -> publish ->
+  stamp-work-records`. The
   child overrides `requirements`, `plan`, `plan-review`, `decompose`,
   `implement`, `implement-same-session`, and `review` under their base ids in
-  the base sequence; `prepare`, `finalize`, and `publish` remain inherited.
-  No base anchor is renamed, skipped, or reordered.
+  the base sequence; `prepare`, `finalize`, `publish`, and
+  `stamp-work-records` remain inherited. The inherited stamp step consumes only
+  an exact landing event ID after publication. No base anchor is renamed,
+  skipped, or reordered.
 - Implementation readiness anchor: `implementation-readiness` is the only
   pack-added step in `bmad-build`. Its declared insertion point is after
   `decompose` and before either implementation drain (`needs = ["decompose"]`;
@@ -146,7 +149,7 @@ assert set(child_order) - {'implementation-readiness'} == {
     'requirements', 'plan', 'plan-review', 'decompose',
     'implement', 'implement-same-session', 'review',
 }
-assert {'prepare', 'finalize', 'publish'} <= set(base_order) - set(child_order)
+assert {'prepare', 'finalize', 'publish', 'stamp-work-records'} <= set(base_order) - set(child_order)
 steps = {step['id']: step for step in child['steps']}
 assert steps['implementation-readiness']['needs'] == ['decompose']
 assert steps['implement']['needs'] == ['implementation-readiness']
