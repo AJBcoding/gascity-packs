@@ -79,18 +79,37 @@ def load_artifact(path: Path, schema: str) -> validate_build_artifact.BuildArtif
     )
 
 
+def require_source_map_matches_manifest(
+    source_map: list[dict[str, Any]], manifest_sources: list[dict[str, Any]], schema_version: int
+) -> None:
+    manifest_by_id = {record["bead_id"]: record for record in manifest_sources}
+    if len(source_map) != len(manifest_sources) or {record["bead_id"] for record in source_map} != set(manifest_by_id):
+        raise LandingAdapterError("integration result source map does not match manifest sources")
+    for record in source_map:
+        source = manifest_by_id[record["bead_id"]]
+        if record["source_sha"] != source["result_sha"]:
+            raise LandingAdapterError("integration result source map does not match manifest source commits")
+        if schema_version == 2 and (
+            record["store_ref"] != source["store_ref"] or record["work_commit"] != source["work_commit"]
+        ):
+            raise LandingAdapterError("integration result source map does not match manifest work identity")
+
+
 def build_direct_receipt(result_path: Path) -> dict[str, object]:
     if not result_path.is_absolute():
         raise LandingAdapterError("integration result path must be absolute")
     resolved_result = result_path.resolve(strict=True)
-    result = load_artifact(resolved_result, "gc.build.integration-result.v1")
+    result = validate_build_artifact.validate_artifact_text(resolved_result.read_text(encoding="utf-8"))
+    if result.schema_id not in {"gc.build.integration-result.v1", "gc.build.integration-result.v2"}:
+        raise LandingAdapterError(f"unsupported integration result schema {result.schema_id}")
+    schema_version = 2 if result.schema_id.endswith(".v2") else 1
     result_front = result.front_matter
     integration = result_front["integration"]
     if result_front["status"] != "approved" or integration["outcome"] != "ready":
         raise LandingAdapterError("integration result must be approved and ready")
 
     manifest_path = Path(integration["manifest_path"]).resolve(strict=True)
-    manifest = load_artifact(manifest_path, "gc.build.integration-manifest.v1")
+    manifest = load_artifact(manifest_path, f"gc.build.integration-manifest.v{schema_version}")
     manifest_front = manifest.front_matter
     manifest_integration = manifest_front["integration"]
     artifact_root = Path(manifest_integration["artifact_root"]).resolve(strict=True)
@@ -105,6 +124,9 @@ def build_direct_receipt(result_path: Path) -> dict[str, object]:
         raise LandingAdapterError("integration result manifest hash does not match manifest")
     if integration["base_sha"] != manifest_integration["base_sha"]:
         raise LandingAdapterError("integration result base SHA does not match manifest")
+    require_source_map_matches_manifest(
+        integration["source_map"], manifest_integration["sources"], schema_version
+    )
 
     repository = Path(manifest_integration["repository"]).resolve(strict=True)
     repository_top = Path(run_git(repository, "rev-parse", "--show-toplevel")).resolve(strict=True)
@@ -119,8 +141,7 @@ def build_direct_receipt(result_path: Path) -> dict[str, object]:
         raise LandingAdapterError("integration scratch HEAD does not match candidate SHA")
 
     remote = manifest_integration["remote"]
-    work_ids = [record["bead_id"] for record in integration["source_map"]]
-    return {
+    receipt = {
         "workflow_id": str(result_front["workflow"]["id"]),
         "integration_attempt_id": f"attempt-{result_front['producer']['attempt']}",
         "repository_path": str(repository),
@@ -133,8 +154,20 @@ def build_direct_receipt(result_path: Path) -> dict[str, object]:
         "publication_mode": "direct",
         "integration_result_path": str(resolved_result),
         "integration_result_hash": sha256_file(resolved_result),
-        "work_bead_ids": work_ids,
     }
+    if schema_version == 2:
+        receipt["schema_version"] = "2"
+        receipt["work_records"] = [
+            {
+                "store_ref": record["store_ref"],
+                "bead_id": record["bead_id"],
+                "work_commit": record["work_commit"],
+            }
+            for record in integration["source_map"]
+        ]
+    else:
+        receipt["work_bead_ids"] = [record["bead_id"] for record in integration["source_map"]]
+    return receipt
 
 
 def receipt_bytes(receipt: dict[str, object]) -> bytes:
@@ -191,7 +224,9 @@ def record_direct(result_path: Path, receipt_path: Path, gc_bin: str) -> dict[st
     )
     if completed.returncode != 0:
         raise LandingAdapterError("gc landing record failed")
-    return decode_core_result(completed.stdout, str(receipt["approved_candidate_sha"]))
+    result = decode_core_result(completed.stdout, str(receipt["approved_candidate_sha"]))
+    result["work_record_stampability"] = "stampable" if receipt.get("schema_version") == "2" else "not_stampable"
+    return result
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

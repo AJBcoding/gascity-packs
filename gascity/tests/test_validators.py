@@ -244,7 +244,21 @@ class BuildArtifactValidatorTests(unittest.TestCase):
             "Verification",
             "Safety",
         ],
+        "gc.build.integration-manifest.v2": [
+            "Candidate",
+            "Sources",
+            "Verification",
+            "Safety",
+        ],
         "gc.build.integration-result.v1": [
+            "Outcome",
+            "Candidate",
+            "Source Map",
+            "Verification",
+            "Conflicts",
+            "Safety",
+        ],
+        "gc.build.integration-result.v2": [
             "Outcome",
             "Candidate",
             "Source Map",
@@ -270,7 +284,9 @@ class BuildArtifactValidatorTests(unittest.TestCase):
         "gc.build.decomposition.v1": "approved",
         "gc.build.implementation-summary.v1": "approved",
         "gc.build.integration-manifest.v1": "approved",
+        "gc.build.integration-manifest.v2": "approved",
         "gc.build.integration-result.v1": "approved",
+        "gc.build.integration-result.v2": "approved",
         "gc.build.review.v1": "approved",
         "gc.build.final-report.v1": "approved",
     }
@@ -280,7 +296,9 @@ class BuildArtifactValidatorTests(unittest.TestCase):
         "gc.build.decomposition.v1": "decomposition.v1.yaml",
         "gc.build.implementation-summary.v1": "implementation-summary.v1.yaml",
         "gc.build.integration-manifest.v1": "integration-manifest.v1.yaml",
+        "gc.build.integration-manifest.v2": "integration-manifest.v2.yaml",
         "gc.build.integration-result.v1": "integration-result.v1.yaml",
+        "gc.build.integration-result.v2": "integration-result.v2.yaml",
         "gc.build.review.v1": "review.v1.yaml",
         "gc.build.final-report.v1": "final-report.v1.yaml",
     }
@@ -301,7 +319,12 @@ class BuildArtifactValidatorTests(unittest.TestCase):
             sections.append(f"## {section}\n\n{content}")
         body = "\n\n".join(sections)
         integration = ""
-        if schema == "gc.build.integration-manifest.v1":
+        if schema in {"gc.build.integration-manifest.v1", "gc.build.integration-manifest.v2"}:
+            work_identity = ""
+            if schema.endswith(".v2"):
+                work_identity = """      store_ref: rig:alpha
+      work_commit: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+"""
             integration = """integration:
   repository: /repo
   artifact_root: /repo/artifacts
@@ -312,7 +335,7 @@ class BuildArtifactValidatorTests(unittest.TestCase):
     - bead_id: task-a
       base_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       result_sha: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-      dependencies: []
+{work_identity}      dependencies: []
       worktree: /repo/worktrees/task-a
       changed_paths: [one.txt]
       summary:
@@ -320,8 +343,13 @@ class BuildArtifactValidatorTests(unittest.TestCase):
         hash: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
   verification:
     - [python3, -m, unittest]
+""".format(work_identity=work_identity)
+        elif schema in {"gc.build.integration-result.v1", "gc.build.integration-result.v2"}:
+            work_identity = ""
+            if schema.endswith(".v2"):
+                work_identity = """      store_ref: rig:alpha
+      work_commit: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 """
-        elif schema == "gc.build.integration-result.v1":
             integration = """integration:
   outcome: ready
   manifest_path: /repo/artifacts/integration-manifest.md
@@ -333,7 +361,7 @@ class BuildArtifactValidatorTests(unittest.TestCase):
   source_map:
     - bead_id: task-a
       source_sha: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-      integrated_sha: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+{work_identity}      integrated_sha: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
   verification:
     - argv: [python3, -m, unittest]
       exit_code: 0
@@ -341,7 +369,7 @@ class BuildArtifactValidatorTests(unittest.TestCase):
   push_performed: false
   pr_opened: false
   target_ref_updated: false
-"""
+""".format(work_identity=work_identity)
         return f"""---
 schema: {schema}
 workflow:
@@ -430,6 +458,44 @@ status: {self.SCHEMA_STATUS[schema]}
             build_artifact_validator.topological_source_order(sources),
             ["task-b", "task-a", "task-c"],
         )
+
+    def test_v2_integration_identity_rejects_unsafe_or_drifted_work_records(self) -> None:
+        manifest = self.valid_artifact("gc.build.integration-manifest.v2")
+        result = self.valid_artifact("gc.build.integration-result.v2")
+        cases = (
+            (
+                manifest,
+                "gc.build.integration-manifest.v2",
+                lambda i: i["sources"][0].update(store_ref="class:graph"),
+                "canonical",
+            ),
+            (
+                manifest,
+                "gc.build.integration-manifest.v2",
+                lambda i: i["sources"][0].update(work_commit="c" * 40),
+                "must equal result_sha",
+            ),
+            (
+                result,
+                "gc.build.integration-result.v2",
+                lambda i: i["source_map"][0].update(store_ref="rig:../alpha"),
+                "canonical",
+            ),
+            (
+                result,
+                "gc.build.integration-result.v2",
+                lambda i: i["source_map"][0].update(work_commit="c" * 40),
+                "must equal source_sha",
+            ),
+        )
+        for document, schema, mutator, message in cases:
+            with self.subTest(schema=schema, message=message), self.assertRaisesRegex(
+                build_artifact_validator.ValidationError, message
+            ):
+                build_artifact_validator.validate_artifact_text(
+                    self.mutate_integration(document, mutator),
+                    expected_schema=schema,
+                )
 
     def test_integration_result_enforces_outcome_specific_evidence(self) -> None:
         valid = self.valid_artifact("gc.build.integration-result.v1")

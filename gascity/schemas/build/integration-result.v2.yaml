@@ -1,0 +1,41 @@
+# Immutable evidence emitted by the shadow integration assembler.
+# Source-map rows preserve canonical store refs and source work commits.
+schema_id: gc.build.integration-result.v2
+artifact: integration-result
+allowed_statuses:
+  - draft
+  - approved
+  - blocked
+  - superseded
+required_front_matter:
+  - schema
+  - workflow.id
+  - workflow.formula
+  - methodology.pack
+  - methodology.name
+  - producer.formula
+  - producer.stage
+  - producer.attempt
+  - status
+  - integration.outcome
+  - integration.manifest_path
+  - integration.manifest_hash
+  - integration.base_sha
+  - integration.scratch_worktree
+  - integration.source_map
+  - integration.verification
+  - trace
+coverage_statuses:
+  - covered
+  - not_applicable
+  - deferred
+  - blocked
+  - out_of_scope
+  - superseded
+required_sections:
+  - Outcome
+  - Candidate
+  - Source Map
+  - Verification
+  - Conflicts
+  - Safety

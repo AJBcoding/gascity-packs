@@ -23,7 +23,7 @@ If this suffix is launched directly, require explicit implementation evidence
 and a typed integration result, or root metadata pointers to both. Resolve an
 empty integration result path from `gc.build.integration_result_path`, then
 `{{artifact_root}}/integration-result.md`. Validate it as
-`gc.build.integration-result.v1`, require outcome `ready`, and record the exact
+`gc.build.integration-result.v2`, require outcome `ready`, and record the exact
 path/hash/candidate/tree on the workflow root. If this step is reached from
 `build-from-convoy-base`, consume the result recorded by its integration
 suffix. Never review disconnected source-worktree heads. Do not run

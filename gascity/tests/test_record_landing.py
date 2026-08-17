@@ -133,9 +133,11 @@ print(json.dumps({{
     return executable
 
 
-def assembled_ready_fixture(root: pathlib.Path) -> tuple[IntegrationRepositoryFixture, pathlib.Path, str]:
+def assembled_ready_fixture(
+    root: pathlib.Path, *, schema_version: int = 1
+) -> tuple[IntegrationRepositoryFixture, pathlib.Path, str]:
     fixture = IntegrationRepositoryFixture(root)
-    manifest = fixture.write_manifest()
+    manifest = fixture.write_manifest(schema_version=schema_version)
     result = fixture.artifact_root / "integration-result.md"
     integrator = load_integrator_module()
     if integrator.main(["assemble", "--manifest", str(manifest), "--result", str(result)]) != 0:
@@ -144,6 +146,44 @@ def assembled_ready_fixture(root: pathlib.Path) -> tuple[IntegrationRepositoryFi
 
 
 class RecordLandingTests(unittest.TestCase):
+    def test_v2_receipt_binds_exact_store_scoped_work_records(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            fixture, result, candidate = assembled_ready_fixture(root, schema_version=2)
+            git(
+                fixture.repository,
+                "push",
+                "origin",
+                f"{candidate}:refs/heads/main",
+                f"--force-with-lease=refs/heads/main:{fixture.base_sha}",
+            )
+            receipt_path = fixture.artifact_root / "landing-receipt.json"
+
+            completed = run_adapter(result, receipt_path, write_fake_gc(root))
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            receipt = json.loads(receipt_path.read_bytes())
+            self.assertEqual(receipt["schema_version"], "2")
+            self.assertNotIn("work_bead_ids", receipt)
+            self.assertEqual(
+                receipt["work_records"],
+                [
+                    {
+                        "store_ref": "rig:alpha",
+                        "bead_id": "task-a",
+                        "work_commit": fixture.source_a_sha,
+                    },
+                    {
+                        "store_ref": "rig:beta",
+                        "bead_id": "task-b",
+                        "work_commit": fixture.source_b_sha,
+                    },
+                ],
+            )
+            adapter_result = json.loads(completed.stdout)
+            self.assertEqual(adapter_result["work_record_stampability"], "stampable")
+            self.assertEqual(adapter_result["observed_landed_sha"], candidate)
+
     def test_remote_identity_matches_core_normalization(self) -> None:
         module = load_record_landing_module()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -225,6 +265,7 @@ class RecordLandingTests(unittest.TestCase):
             self.assertRegex(first_result["event_id"], r"^gcl-[0-9a-f]{64}$")
             self.assertEqual(first_result["observed_landed_sha"], candidate)
             self.assertFalse(first_result["already_recorded"])
+            self.assertEqual(first_result["work_record_stampability"], "not_stampable")
 
             second = subprocess.run(command, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             self.assertEqual(second.returncode, 0, second.stderr)
@@ -233,6 +274,7 @@ class RecordLandingTests(unittest.TestCase):
             self.assertEqual(second_result["event_id"], first_result["event_id"])
             self.assertEqual(second_result["observed_landed_sha"], candidate)
             self.assertTrue(second_result["already_recorded"])
+            self.assertEqual(second_result["work_record_stampability"], "not_stampable")
 
     def test_record_direct_rejects_result_manifest_attempt_drift_before_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -262,6 +304,22 @@ class RecordLandingTests(unittest.TestCase):
             self.assertNotEqual(completed.returncode, 0)
             self.assertIn("attempt", completed.stderr)
             self.assertFalse(receipt_path.exists())
+
+    def test_v2_receipt_rejects_source_identity_drift_from_manifest(self) -> None:
+        module = load_record_landing_module()
+        for field, value in (("store_ref", "rig:gamma"), ("work_commit", "c" * 40)):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as temp_dir:
+                _, result, _ = assembled_ready_fixture(pathlib.Path(temp_dir), schema_version=2)
+
+                def drift(data) -> None:
+                    row = data["integration"]["source_map"][0]
+                    row[field] = value
+                    if field == "work_commit":
+                        row["source_sha"] = value
+
+                rewrite_front_matter(result, drift)
+                with self.assertRaisesRegex(module.LandingAdapterError, "source map.*manifest"):
+                    module.build_direct_receipt(result)
 
     def test_record_direct_rejects_relative_integration_result_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

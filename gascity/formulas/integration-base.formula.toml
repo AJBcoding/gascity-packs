@@ -38,7 +38,7 @@ default = "gc.integration-operator"
 [[steps]]
 id = "prepare-manifest"
 title = "Prepare integration manifest"
-metadata = { "gc.run_target" = "gc.run-operator", "gc.build.artifact_schema" = "gc.build.integration-manifest.v1", "gc.build.artifact_path_keys" = "gc.build.integration_manifest_path,gc.var.integration_manifest_path" }
+metadata = { "gc.run_target" = "gc.run-operator", "gc.build.artifact_schema" = "gc.build.integration-manifest.v2", "gc.build.artifact_path_keys" = "gc.build.integration_manifest_path,gc.var.integration_manifest_path" }
 description_file = "../assets/workflows/integration-base/prepare-manifest.md"
 
 [steps.check]
@@ -60,7 +60,7 @@ description_file = "../assets/workflows/integration-base/assemble-candidate.md"
 id = "record-result"
 title = "Record integration result"
 needs = ["assemble-candidate"]
-metadata = { "gc.run_target" = "gc.run-operator", "gc.build.artifact_schema" = "gc.build.integration-result.v1", "gc.build.artifact_path_keys" = "gc.build.integration_result_path,gc.var.integration_result_path" }
+metadata = { "gc.run_target" = "gc.run-operator", "gc.build.artifact_schema" = "gc.build.integration-result.v2", "gc.build.artifact_path_keys" = "gc.build.integration_result_path,gc.var.integration_result_path" }
 description_file = "../assets/workflows/integration-base/record-result.md"
 
 [steps.check]

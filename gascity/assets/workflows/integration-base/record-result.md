@@ -3,7 +3,8 @@ methodologies may override reporting, but must preserve the validated result
 path, hash, outcome, candidate commit, and tree identity.
 
 Require `{{integration_result_path}}` to validate as
-`gc.build.integration-result.v1`. Compute its `sha256:` hash and record
+`gc.build.integration-result.v2`. Require every source-map row to preserve the
+manifest's exact `store_ref` and `work_commit`. Compute its `sha256:` hash and record
 `gc.build.integration_result_path`, `gc.build.integration_result_hash`,
 `gc.build.integration_outcome`, `gc.build.integration_candidate_commit`, and
 `gc.build.integration_tree` when present on the workflow root.

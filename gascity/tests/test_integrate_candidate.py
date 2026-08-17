@@ -95,15 +95,40 @@ class IntegrationRepositoryFixture:
     def origin_main(self) -> str:
         return git(self.origin, "rev-parse", "refs/heads/main").stdout.strip()
 
-    def write_manifest(self, sources: list[dict] | None = None, verification: list[list[str]] | None = None) -> pathlib.Path:
+    def write_manifest(
+        self,
+        sources: list[dict] | None = None,
+        verification: list[list[str]] | None = None,
+        *,
+        schema_version: int = 1,
+    ) -> pathlib.Path:
         summaries = self.artifact_root / "summaries"
         summaries.mkdir(exist_ok=True)
-        source_rows = sources or [
-            self.source_record("task-b", self.source_b, self.source_b_sha, ["task-a"], ["b.txt"]),
-            self.source_record("task-a", self.source_a, self.source_a_sha, [], ["a.txt"]),
-        ]
+        if sources is None:
+            source_rows = [
+                self.source_record(
+                    "task-b",
+                    self.source_b,
+                    self.source_b_sha,
+                    ["task-a"],
+                    ["b.txt"],
+                    store_ref="rig:beta" if schema_version == 2 else None,
+                    work_commit=self.source_b_sha if schema_version == 2 else None,
+                ),
+                self.source_record(
+                    "task-a",
+                    self.source_a,
+                    self.source_a_sha,
+                    [],
+                    ["a.txt"],
+                    store_ref="rig:alpha" if schema_version == 2 else None,
+                    work_commit=self.source_a_sha if schema_version == 2 else None,
+                ),
+            ]
+        else:
+            source_rows = sources
         front_matter = {
-            "schema": "gc.build.integration-manifest.v1",
+            "schema": f"gc.build.integration-manifest.v{schema_version}",
             "workflow": {"id": "build-test-001", "formula": "build-basic"},
             "methodology": {"pack": "gascity", "name": "build-basic"},
             "producer": {"formula": "integrate", "stage": "prepare-manifest", "attempt": 1},
@@ -144,12 +169,15 @@ class IntegrationRepositoryFixture:
         result_sha: str,
         dependencies: list[str],
         changed_paths: list[str],
+        *,
+        store_ref: str | None = None,
+        work_commit: str | None = None,
     ) -> dict:
         summary_path = self.artifact_root / "summaries" / f"{bead_id}.md"
         summary_text = f"# {bead_id}\n"
         summary_path.parent.mkdir(exist_ok=True)
         summary_path.write_text(summary_text, encoding="utf-8")
-        return {
+        record = {
             "bead_id": bead_id,
             "base_sha": self.base_sha,
             "result_sha": result_sha,
@@ -161,9 +189,38 @@ class IntegrationRepositoryFixture:
                 "hash": f"sha256:{hashlib.sha256(summary_text.encode()).hexdigest()}",
             },
         }
+        if store_ref is not None:
+            record["store_ref"] = store_ref
+        if work_commit is not None:
+            record["work_commit"] = work_commit
+        return record
 
 
 class IntegrateCandidateTests(unittest.TestCase):
+    def test_v2_propagates_store_scoped_source_identity_into_result(self) -> None:
+        module = load_integrator_module()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fixture = IntegrationRepositoryFixture(pathlib.Path(temp_dir))
+            manifest = fixture.write_manifest(schema_version=2)
+            result = fixture.artifact_root / "integration-result.md"
+
+            self.assertEqual(module.main(["assemble", "--manifest", str(manifest), "--result", str(result)]), 0)
+            artifact = validate_build_artifact.validate_artifact_text(
+                result.read_text(encoding="utf-8"),
+                expected_schema="gc.build.integration-result.v2",
+            )
+            self.assertEqual(
+                [
+                    (row["store_ref"], row["bead_id"], row["work_commit"])
+                    for row in artifact.front_matter["integration"]["source_map"]
+                ],
+                [
+                    ("rig:alpha", "task-a", fixture.source_a_sha),
+                    ("rig:beta", "task-b", fixture.source_b_sha),
+                ],
+            )
+
     def test_assembles_dependency_order_and_writes_ready_result_without_mutating_target(self) -> None:
         self.assertTrue(SCRIPT_PATH.is_file(), f"missing {SCRIPT_PATH}")
         self.assertTrue(os.access(SCRIPT_PATH, os.X_OK), f"{SCRIPT_PATH} must be executable")

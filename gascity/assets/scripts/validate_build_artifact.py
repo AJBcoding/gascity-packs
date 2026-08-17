@@ -18,6 +18,7 @@ except ImportError:  # pragma: no cover
 FRONT_MATTER_RE = re.compile(r"\A---\n(?P<front>.*?)\n---(?:\n|\Z)(?P<body>.*)\Z", re.DOTALL)
 SCHEMA_ROOT = Path(__file__).resolve().parents[2] / "schemas" / "build"
 FORBIDDEN_REQUIRED_FIELD_NAMES = {"owner", "stage-owner", "stage_owner", "persona", "role"}
+STORE_REF_RE = re.compile(r"(?:city|rig):[A-Za-z0-9][A-Za-z0-9._-]{0,254}")
 
 
 class ValidationError(Exception):
@@ -116,12 +117,16 @@ def validate_required_front_matter(front_matter: dict[str, Any], schema: dict[st
 
 def validate_schema_contract(schema_id: str, front_matter: dict[str, Any]) -> None:
     if schema_id == "gc.build.integration-manifest.v1":
-        validate_integration_manifest(required_mapping(front_matter, "integration"))
+        validate_integration_manifest(required_mapping(front_matter, "integration"), require_work_records=False)
+    elif schema_id == "gc.build.integration-manifest.v2":
+        validate_integration_manifest(required_mapping(front_matter, "integration"), require_work_records=True)
     elif schema_id == "gc.build.integration-result.v1":
-        validate_integration_result(required_mapping(front_matter, "integration"), front_matter)
+        validate_integration_result(required_mapping(front_matter, "integration"), front_matter, require_work_records=False)
+    elif schema_id == "gc.build.integration-result.v2":
+        validate_integration_result(required_mapping(front_matter, "integration"), front_matter, require_work_records=True)
 
 
-def validate_integration_manifest(integration: dict[str, Any]) -> None:
+def validate_integration_manifest(integration: dict[str, Any], *, require_work_records: bool) -> None:
     validate_absolute_path(required_string(integration, "repository"), "integration.repository")
     validate_absolute_path(required_string(integration, "artifact_root"), "integration.artifact_root")
     required_string(integration, "remote", prefix="integration")
@@ -137,7 +142,12 @@ def validate_integration_manifest(integration: dict[str, Any]) -> None:
             raise ValidationError(f"{prefix} must be a mapping")
         required_string(source, "bead_id", prefix=prefix)
         validate_git_sha(source.get("base_sha"), f"{prefix}.base_sha")
-        validate_git_sha(source.get("result_sha"), f"{prefix}.result_sha")
+        result_sha = validate_git_sha(source.get("result_sha"), f"{prefix}.result_sha")
+        if require_work_records:
+            validate_store_ref(required_string(source, "store_ref", prefix=prefix), f"{prefix}.store_ref")
+            work_commit = validate_git_sha(source.get("work_commit"), f"{prefix}.work_commit")
+            if work_commit != result_sha:
+                raise ValidationError(f"{prefix}.work_commit must equal result_sha")
         dependencies = source.get("dependencies")
         if not isinstance(dependencies, list) or not all(
             isinstance(item, str) and item.strip() for item in dependencies
@@ -157,7 +167,9 @@ def validate_integration_manifest(integration: dict[str, Any]) -> None:
     validate_argv_list(integration.get("verification"), "integration.verification")
 
 
-def validate_integration_result(integration: dict[str, Any], front_matter: dict[str, Any]) -> None:
+def validate_integration_result(
+    integration: dict[str, Any], front_matter: dict[str, Any], *, require_work_records: bool
+) -> None:
     outcome = required_string(integration, "outcome", prefix="integration")
     if outcome not in {"ready", "needs_rework", "failed"}:
         raise ValidationError("integration.outcome must be ready, needs_rework, or failed")
@@ -180,7 +192,12 @@ def validate_integration_result(integration: dict[str, Any], front_matter: dict[
         if bead_id in seen:
             raise ValidationError(f"{prefix}.bead_id duplicates {bead_id!r}")
         seen.add(bead_id)
-        validate_git_sha(record.get("source_sha"), f"{prefix}.source_sha")
+        source_sha = validate_git_sha(record.get("source_sha"), f"{prefix}.source_sha")
+        if require_work_records:
+            validate_store_ref(required_string(record, "store_ref", prefix=prefix), f"{prefix}.store_ref")
+            work_commit = validate_git_sha(record.get("work_commit"), f"{prefix}.work_commit")
+            if work_commit != source_sha:
+                raise ValidationError(f"{prefix}.work_commit must equal source_sha")
         validate_git_sha(record.get("integrated_sha"), f"{prefix}.integrated_sha")
 
     verification = integration.get("verification")
@@ -226,6 +243,12 @@ def validate_integration_result(integration: dict[str, Any], front_matter: dict[
 def validate_git_sha(value: Any, field: str) -> str:
     if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{40}", value) is None:
         raise ValidationError(f"{field} must be a 40 lowercase hexadecimal Git SHA")
+    return value
+
+
+def validate_store_ref(value: str, field: str) -> str:
+    if STORE_REF_RE.fullmatch(value) is None:
+        raise ValidationError(f"{field} must be canonical city:<name> or rig:<name>")
     return value
 
 
