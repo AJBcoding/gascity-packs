@@ -755,6 +755,37 @@ def write_check_gc_stub(bin_dir: pathlib.Path, *, parent_show: bool = False) -> 
 
 
 class FormulaAssetTests(unittest.TestCase):
+    def test_requirements_and_readme_define_verified_publication_states(self) -> None:
+        root = pathlib.Path(__file__).resolve().parents[1]
+        requirements = (root / "REQUIREMENTS.md").read_text(encoding="utf-8")
+        formula_requirements = (root / "formulas/REQUIREMENTS.md").read_text(encoding="utf-8")
+        readme = (root / "README.md").read_text(encoding="utf-8")
+
+        for fragment in (
+            "direct: `published` + `landed` + `gcl-` event",
+            "pull request: `published` + `pending_external_merge` + no landing event",
+            "disabled: `noop` + `not_requested`",
+            "post-push verification failure: `publication_pending` + `verification_failed`",
+            "record_landing.py",
+            "gc landing record",
+        ):
+            with self.subTest(document="requirements", fragment=fragment):
+                self.assertIn(fragment, requirements)
+
+        for fragment in ("GC-BF-018", "record_landing.py", "gc landing record"):
+            with self.subTest(document="formula requirements", fragment=fragment):
+                self.assertIn(fragment, formula_requirements)
+
+        for fragment in (
+            "integrate -> review -> finalize -> authorized publish -> verified landing",
+            "ephemeral publisher",
+            "pending_external_merge",
+            "does not produce a typed integration result",
+            "legacy and non-qualifying",
+        ):
+            with self.subTest(document="README", fragment=fragment):
+                self.assertIn(fragment, readme)
+
     def test_build_publish_surfaces_require_verified_landing_contract(self) -> None:
         packs_root = pathlib.Path(__file__).resolve().parents[2]
         surfaces = {
