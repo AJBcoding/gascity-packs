@@ -26,8 +26,9 @@ and verification records as the authoritative implementation evidence. Never
 present disconnected source-worktree heads as the reviewed or shipped
 candidate.
 
-Collect the closed implementation source anchors and drain child workflows from
-the implementation convoy. Read their recorded implementation summary paths
+Collect the open `gc.delivery_state=integration_ready` implementation source
+anchors and successful drain child workflows from the implementation convoy.
+Read their recorded implementation summary paths
 from `gc.implementation.summary_path`, `gc.build.implementation_summary_path`,
 or `gc.var.summary_path`. Include those summaries as upstream evidence. If an
 item summary is missing coverage IDs that appear in the requirements artifact,

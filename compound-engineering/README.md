@@ -172,7 +172,7 @@ flowchart TD
         direction TB
         SeparatePrep["prepare-worktree<br/>inherited do-work<br/>separate drain only"]:::inherited --> CompoundWork["ce-work implement override"]:::compound
         SharedWork["ce-work shared implement-item override"]:::compound
-        CompoundWork --> CloseItem["close source anchor<br/>inherited do-work"]:::inherited
+        CompoundWork --> CloseItem["submit source anchor<br/>integration_ready"]:::inherited
     end
 
     DrainSeparate --> SeparatePrep

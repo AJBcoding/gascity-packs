@@ -13,4 +13,7 @@ After the commit and final proof pass, record the exact source-worktree `HEAD`
 on the source anchor as `gc.work_commit`. It remains the source result and must
 not be rewritten to an integrated or landed commit.
 
+Leave the source anchor open for the compatibility submission step, which
+records `gc.delivery_state=integration_ready` after readback. Never set `gc.work_outcome=shipped` from the branch commit, tests, or task-review verdict.
+
 Do not invoke provider-native subagents or upstream plugin runtime commands.

@@ -74,6 +74,12 @@ for every derived pack.
   one shared single-lane session with `on_item_failure = "skip_remaining"`.
   Both preserve the build-base drain lifecycle, convoy identity, and per-item
   evidence.
+- Source-completion contract: both Superpowers TDD paths preserve
+  `gc.work_base_commit`, record the focused `gc.work_commit`, submit the exact
+  source as `gc.delivery_state=integration_ready`, and leave the source work
+  record open. The compatibility-named `close-source-anchor` step closes only
+  its control bead with `gc.outcome`; no passing test or task review sets
+  `gc.work_outcome=shipped`.
 - TDD durability: the red/green discipline from the vendored
   `test-driven-development` skill is durable graph structure, not prose-only
   guidance. Both item formulas chain `write-failing-test`,

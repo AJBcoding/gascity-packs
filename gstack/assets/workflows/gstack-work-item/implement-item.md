@@ -10,7 +10,13 @@ anchor's `gc.work_base_commit` when absent. After the focused commit and proof
 pass, record exact item `HEAD` as `gc.work_commit`. Never replace that source
 result with an integrated or landed commit.
 
-Close with `gc.outcome=pass` only after verification.
+Record `gc.delivery_state=integration_ready` on the exact source anchor and
+read it and `gc.work_commit` back. Leave the source anchor open for integration
+and verified landing. Never set `gc.work_outcome=shipped` from the branch
+commit, proof, or self-review. Only a later exact-record transition may request
+shipped after portable post-landing stamping succeeds.
+
+Close only this claimed workflow step with `gc.outcome=pass` after verification.
 
 Do not invoke provider-native subagents. You are the single item lane.
 

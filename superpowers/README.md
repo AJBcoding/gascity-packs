@@ -226,7 +226,7 @@ flowchart TD
         Code --> VerifyGreen["verify tests pass"]:::superpowers
         VerifyGreen --> TaskReview["task-review<br/>spec + quality fanout"]:::superpowers
         TaskReview --> Record["record task result"]:::superpowers
-        Record --> CloseItem["close source anchor<br/>Superpowers override"]:::superpowers
+        Record --> CloseItem["submit source anchor<br/>integration_ready"]:::superpowers
     end
 
     ItemFanout --> SeparatePrep

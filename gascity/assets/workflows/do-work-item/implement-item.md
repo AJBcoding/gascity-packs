@@ -2,7 +2,9 @@
 Run inside an existing shared worktree lifecycle. Resolve reserved `convoy_id`,
 read `gc.drain_member_id` and `gc.drain_item_index`, validate ownership and
 verification policy, validate context path {{context_path}} when set, implement
-the item, write an item summary, and close only the source anchor on success.
+the item, and write an item summary. On success, record
+`gc.delivery_state=integration_ready` on the exact source anchor while leaving
+the source anchor open.
 
 Do not infer the source anchor from dependency ids. Read the reserved convoy and
 source anchor metadata directly; when `gc bd show --json` returns a one-element
@@ -18,7 +20,11 @@ proof pass, record that exact 40-character commit as `gc.work_commit`. Later
 items sharing the worktree keep their own base/result pairs. `gc.work_commit`
 always means that item's source-worktree commit; never rewrite it to an
 integrated, published, or landed commit. Read both fields back before closing
-the source anchor.
+only this claimed workflow step with `gc.outcome=pass`. Read
+`gc.delivery_state=integration_ready` back too. Leave the source anchor open
+for integration and verified landing. Never set `gc.work_outcome=shipped`
+merely because the item tests passed; only a later exact-record transition may
+request shipped after portable post-landing stamping has succeeded.
 
 Write or update the item summary with these schema-required body sections,
 using the exact `##` headings below in this order:

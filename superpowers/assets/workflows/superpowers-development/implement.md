@@ -12,6 +12,11 @@ small enough to implement independently, identify the first test behavior to
 drive, and write a compact task context note for the following implementation
 steps.
 
+The later result and compatibility submission steps record the focused
+`gc.work_commit` and `gc.delivery_state=integration_ready`. Leave the source anchor open. Never set `gc.work_outcome=shipped` from a passing test or task
+review; portable post-landing stamping must precede any exact-record shipped
+transition.
+
 Do not edit source files in the launcher checkout. Do not invoke
 provider-native subagents or upstream plugin runtime commands.
 

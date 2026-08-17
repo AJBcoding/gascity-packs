@@ -13,7 +13,11 @@ After the focused commit and proof pass, record exact `HEAD` as
 `gc.work_commit` on the source anchor. Never replace that source result with an
 integrated or landed commit.
 
-Close with `gc.outcome=pass` only after the work is implemented and verified.
+Leave the source anchor open for the inherited compatibility submission step,
+which records `gc.delivery_state=integration_ready` after readback. Never set `gc.work_outcome=shipped` from the branch commit, proof, or self-review.
+
+Close only this claimed workflow step with `gc.outcome=pass` after the work is
+implemented and verified.
 
 Do not invoke provider-native subagents. You are the implementation lane.
 

@@ -159,7 +159,7 @@ flowchart TD
         ApplyStory --> StoryGate{"story clean?<br/>implementation-review check"}:::infra
         StoryGate -->|no: fix story and re-check| StorySetup
         StoryGate -->|yes| StoryDone["story accepted"]:::bmad
-        StoryDone --> CloseStory["close source anchor<br/>inherited do-work<br/>separate drain only"]:::inherited
+        StoryDone --> CloseStory["submit source anchor<br/>integration_ready<br/>separate drain only"]:::inherited
     end
 
     DrainSeparate --> SeparatePrep

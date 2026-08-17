@@ -2,8 +2,9 @@
 Wait only on the core drain control bead and its `gc.drain_manifest.v1` rows.
 Success requires the drain control to be closed with `gc.drain_state=succeeded`
 and `gc.outcome=pass`, and every manifest row to have `status=succeeded` and
-`outcome_kind=pass` or a selected source anchor already closed with
-`gc.outcome=pass`. Failed, skipped, abandoned, or still-open manifest rows make
+`outcome_kind=pass`, with every selected source anchor still open and carrying
+its exact `gc.work_commit` plus `gc.delivery_state=integration_ready`. Failed,
+skipped, abandoned, closed-as-shipped, or non-integration-ready source rows make
 implement fail and write the aggregate summary.
 
 Do not wait for or inspect downstream steps that depend on this bead, including

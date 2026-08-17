@@ -130,6 +130,14 @@ top-level stages only as anchored extensions:
   immutable evidence; the publisher applies explicit authorization; core
   independently observes the target before recording landing; then a stock
   operator replays that exact event into its bound source stores.
+- Implementation completion records source provenance and
+  `gc.delivery_state=integration_ready` while leaving the source work record
+  open. Passing implementation tests close only workflow/control steps through
+  `gc.outcome`; they never imply `gc.work_outcome=shipped`.
+- Only a post-landing transition for the exact stamped work record may request
+  `gc.work_outcome=shipped`. Portable stamping must already have succeeded for
+  that record; a branch, commit, review verdict, or aggregate stamp count is not
+  shipping evidence by itself.
 
 ## Base Stage Artifact Contracts
 
@@ -144,8 +152,8 @@ paths.
 | `plan` | Produces an implementation plan or engineering design traceable to approved requirement IDs. |
 | `plan-review` | Produces an approval verdict. It approves the plan, requests concrete changes, asks questions only when the mode permits, or blocks with a reason. |
 | `decompose` | Produces durable work units and records implementation convoy identity on root metadata. |
-| `implement` | Executes the selected implementation strategy and writes per-item or explicitly mapped implementation evidence. |
-| `implement-same-session` | Executes the selected same-session implementation strategy, preserving shared context and item traceability. |
+| `implement` | Executes the selected implementation strategy, writes per-item or explicitly mapped implementation evidence, records each source as `gc.delivery_state=integration_ready`, and leaves source work open. |
+| `implement-same-session` | Executes the selected same-session implementation strategy, preserving shared context and item traceability while submitting each source as open `integration_ready` work. |
 | `integrate` | Produces a typed source manifest, assembles and verifies one isolated shadow candidate, and records immutable candidate/tree evidence before review. |
 | `review` | Produces a review verdict/report with required fixes or approval. |
 | `finalize` | Writes the final workflow report covering requirements, plan, decomposition, implementation, review attempts, risk, drift, publish status, and next action. |
@@ -813,6 +821,8 @@ Proof expectation: validation requires `workflow.formula`, `producer.formula`,
 | GC-METH-BR-056 | GC-METH-US-001 | WHEN a pull request is opened, THE publish stage SHALL treat it as published but not landed and SHALL NOT create a landing receipt, emit `delivery.landed`, set a landed SHA, or close shipped work before a trusted external merge observer supplies the actual landed SHA. |
 | GC-METH-BR-057 | GC-METH-US-001 | AFTER direct publication has closed with an exact `gc.build.landing_event_id`, THE separate `stamp-work-records` stage SHALL invoke `gc landing stamp --event "$EVENT_ID" --json` through an ephemeral stock operator and SHALL mirror only bounded status and count metadata. |
 | GC-METH-BR-058 | GC-METH-US-001 | IF post-landing stamping fails, THEN THE workflow SHALL preserve the truthful landed publication evidence, record `landing_recorded_stamp_pending`, and allow exact-event replay; PR-pending and disabled publication SHALL NOT invoke stamping. |
+| GC-METH-BR-059 | GC-METH-US-001 | WHEN source implementation completes, THE workflow SHALL preserve `gc.work_base_commit`, record the exact focused `gc.work_commit`, write implementation evidence, set `gc.delivery_state=integration_ready`, and leave the source work record open; passing tests or review SHALL NOT set `gc.work_outcome=shipped`. |
+| GC-METH-BR-060 | GC-METH-US-001 | WHEN a workflow/check/drain/session control bead closes, IT SHALL use `gc.outcome=pass|fail|skipped`; only a post-landing transition bound to an exact source record whose portable stamp succeeded MAY request `gc.work_outcome=shipped`. |
 | GC-METH-BR-051 | GC-METH-US-001 | IF review/fix cannot reach approval because evidence is missing, a drain failed, review is blocked, report mode forbids mutation, or maximum iterations are exhausted, THEN finalization SHALL record a failing blocked outcome plus `gc.build.repair_status` and `gc.restart.*` metadata rather than closing the workflow as pass; publish no-op SHALL preserve that outcome. |
 | GC-METH-BR-017 | GC-METH-TS-003 | WHEN a downstream artifact consumes an upstream artifact, THE downstream artifact SHALL record the upstream path and content hash or revision ID. |
 | GC-METH-BR-018 | GC-METH-TS-003 | IF upstream artifacts drift after downstream work starts, THEN review and finalization SHALL surface drift and SHALL NOT silently proceed. |
@@ -875,6 +885,7 @@ Proof expectation: validation requires `workflow.formula`, `producer.formula`,
 | GC-METH-016 | Nested continuation suffixes | `build-from-requirements-base -> build-from-plan-base -> build-from-decompose-base -> build-from-convoy-base -> build-from-review-base` form a nested suffix chain. Each suffix validates its prerequisite, performs its owned work, and hands off to the next suffix. Cataloged `build-from-*` wrappers expose the default Gas City behavior. | `formulas/build-from-*-base.formula.toml`; `formulas/build-from-*.formula.toml`; `tests/test_formula_assets.py::FormulaAssetTests::test_build_continuation_bases_form_nested_suffix_chain`; `tests/test_formula_assets.py::FormulaAssetTests::test_default_continuation_entrypoints_extend_suffix_bases` |
 | GC-METH-017 | Verified publication | An ephemeral publisher maps direct, PR, disabled, and post-push-failure modes to distinct landing states; only exact core observation of an approved candidate produces a `gcl-` landing event. | `assets/workflows/build-base/publish.md`; `assets/scripts/record_landing.py`; `tests/test_record_landing.py`; `tests/test_formula_assets.py::FormulaAssetTests::test_build_publish_surfaces_require_verified_landing_contract` |
 | GC-METH-018 | Portable post-landing stamping | A separate ephemeral stock operator consumes only the exact landing event ID, invokes `gc landing stamp`, mirrors bounded counts, no-ops without an event, and leaves failed stamping as replayable `landing_recorded_stamp_pending` without undoing landing. | `assets/workflows/build-base/stamp-work-records.md`; `tests/test_formula_assets.py::FormulaAssetTests::test_post_landing_stamping_is_ephemeral_and_preserved_by_derived_builds` |
+| GC-METH-019 | Truthful source completion | Base and derived implementation paths preserve source commit provenance, mark exact source work `gc.delivery_state=integration_ready`, and leave it open; control steps retain `gc.outcome`, and no branch-only implementation path claims shipped. | `assets/workflows/do-work/close-source-anchor.md`; `tests/test_formula_assets.py::FormulaAssetTests::test_do_work_formula_requires_persisted_item_worktree`; `tests/test_derived_pack_compatibility.py::DerivedPackCompatibilityTests::test_implementation_overrides_submit_open_work_for_integration` |
 
 ## Deferred Follow-Up Requirements
 

@@ -306,7 +306,7 @@ flowchart TD
         direction TB
         SeparatePrep["prepare-worktree<br/>do-work"]:::base --> Implement["implement owned work<br/>gc.implementation-worker"]:::basic
         SharedImplement["implement shared item<br/>do-work-item"]:::base
-        Implement --> CloseItem["close source anchor<br/>do-work"]:::base
+        Implement --> CloseItem["submit source anchor<br/>integration_ready"]:::base
     end
 
     DrainSeparate --> SeparatePrep
@@ -757,9 +757,11 @@ expand = "company-implementation-item-loop"
 metadata = { "gc.run_target" = "gc.implementation-worker" }
 ```
 
-The loop can implement, test, repair, and self-review the item, but
-`close-source-anchor` must still be able to verify the source anchor outcome and
-close it with `gc.outcome=pass`.
+The loop can implement, test, repair, and self-review the item, but the stable
+`close-source-anchor` compatibility step must still verify source provenance,
+record `gc.delivery_state=integration_ready`, and leave the source work record
+open. Passing tests close only control steps with `gc.outcome=pass`; they never
+justify `gc.work_outcome=shipped`.
 
 ### Gap Analysis
 

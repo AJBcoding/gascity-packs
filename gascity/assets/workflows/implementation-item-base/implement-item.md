@@ -14,7 +14,12 @@ one-element list before reading metadata.
 
 Write the per-item implementation summary as a `gc.build.implementation-summary.v1`
 artifact and record its absolute path on the workflow root bead as
-`gc.implementation.summary_path` before closing.
+`gc.implementation.summary_path` before closing this control step. Record the
+exact focused `gc.work_commit` and `gc.delivery_state=integration_ready` on the
+source anchor, then read both back. Leave the source anchor open. Never set
+`gc.work_outcome=shipped` merely because implementation tests passed; only a
+later exact-record transition may request shipped after portable post-landing
+stamping has succeeded.
 
 The summary body must contain these exact schema-required `##` headings in this
 order:

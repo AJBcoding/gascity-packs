@@ -12,7 +12,9 @@ compact task context note for the following implementation steps.
 
 Before any later step edits the shared source-worktree, record its current
 `HEAD` on this source anchor as `gc.work_base_commit` when absent. Preserve that
-base for the complete item lifecycle.
+base for the complete item lifecycle. The later result and submission steps
+record the focused `gc.work_commit` and
+`gc.delivery_state=integration_ready`. Leave the source anchor open. Never set `gc.work_outcome=shipped` from a passing test or task review.
 
 Do not edit source files in the launcher checkout. Do not invoke
 provider-native subagents or upstream plugin runtime commands.

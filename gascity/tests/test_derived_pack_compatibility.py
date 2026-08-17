@@ -61,6 +61,8 @@ LEDGER_REQUIRED_FRAGMENTS = (
     "## Evidence Commands",
     "../gascity",
     "build-base",
+    "gc.delivery_state=integration_ready",
+    "gc.work_outcome=shipped",
 )
 
 IMPLEMENTATION_PROVENANCE_ASSETS = {
@@ -80,6 +82,27 @@ IMPLEMENTATION_PROVENANCE_ASSETS = {
         "assets/workflows/gstack-work/implement.md": ("gc.work_base_commit", "gc.work_commit"),
         "assets/workflows/gstack-work-item/implement-item.md": ("gc.work_base_commit", "gc.work_commit"),
     },
+}
+
+IMPLEMENTATION_LIFECYCLE_ASSETS = {
+    "compound-engineering": (
+        "assets/workflows/compound-work/implement.md",
+        "assets/workflows/compound-work-item/implement-item.md",
+    ),
+    "superpowers": (
+        "assets/workflows/superpowers-development/implement.md",
+        "assets/workflows/superpowers-development/implement-item.md",
+        "assets/workflows/superpowers-development/record-item-result.md",
+        "assets/workflows/superpowers-development/close-source-anchor.md",
+    ),
+    "bmad": (
+        "assets/workflows/bmad-story-development/implement.md",
+        "assets/workflows/bmad-story-development/implement-item.md",
+    ),
+    "gstack": (
+        "assets/workflows/gstack-work/implement.md",
+        "assets/workflows/gstack-work-item/implement-item.md",
+    ),
 }
 
 
@@ -174,6 +197,25 @@ class DerivedPackCompatibilityTests(unittest.TestCase):
                     for fragment in required_fragments:
                         self.assertIn(fragment, text)
                     self.assertIn("source-worktree", text)
+
+    def test_implementation_overrides_submit_open_work_for_integration(self) -> None:
+        """A methodology override may finish its control step, but it may not
+        turn a tested source commit into a branch-only shipped close."""
+        for pack_name, relative_paths in IMPLEMENTATION_LIFECYCLE_ASSETS.items():
+            for relative_path in relative_paths:
+                with self.subTest(pack=pack_name, asset=relative_path):
+                    text = (PACKS_ROOT / pack_name / relative_path).read_text(
+                        encoding="utf-8"
+                    )
+                    self.assertIn("gc.work_commit", text)
+                    self.assertIn("gc.delivery_state=integration_ready", text)
+                    self.assertIn("Leave the source anchor open", text)
+                    self.assertIn("Never set `gc.work_outcome=shipped`", text)
+                    self.assertNotRegex(
+                        text,
+                        r"--set-metadata\s+['\"]gc\.work_outcome=shipped",
+                    )
+                    self.assertNotIn("close only the source anchor", text.lower())
 
     def test_packs_import_gascity_base_as_gc(self) -> None:
         for pack_name, expected in DERIVED_PACKS.items():

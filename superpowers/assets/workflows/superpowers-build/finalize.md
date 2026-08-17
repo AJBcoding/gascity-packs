@@ -7,7 +7,8 @@ an absolute, existing path as
 `{{artifact_root}}/implementation-summary.md`. A per-item summary inside an
 implementation worktree is not sufficient because that worktree is disposable.
 
-Read the closed implementation source anchors and their recorded per-item
+Read the open `gc.delivery_state=integration_ready` implementation source
+anchors and their recorded per-item
 `gc.implementation.summary_path` values. If the root already points to a valid
 `gc.build.implementation-summary.v1` artifact at the canonical path, preserve
 it. Otherwise synthesize `implementation-summary.md` from those source anchors,

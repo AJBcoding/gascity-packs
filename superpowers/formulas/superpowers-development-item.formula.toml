@@ -78,7 +78,7 @@ description_file = "../assets/workflows/superpowers-development/record-item-resu
 
 [[steps]]
 id = "close-source-anchor"
-title = "Close Superpowers shared-drain task"
+title = "Submit Superpowers shared-drain task for integration"
 needs = ["record-item-result"]
 metadata = { "gc.run_target" = "gc.run-operator" }
 description_file = "../assets/workflows/superpowers-development/close-source-anchor.md"

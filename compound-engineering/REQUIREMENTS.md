@@ -52,6 +52,11 @@ for every derived pack.
   `same-session` path drains `compound-work-item` in one shared single-lane
   session with `on_item_failure = "skip_remaining"`. Both preserve the
   build-base drain lifecycle, convoy identity, and per-item evidence.
+- Source-completion contract: both Compound implementation paths preserve
+  `gc.work_base_commit`, record the focused `gc.work_commit`, submit the exact
+  source as `gc.delivery_state=integration_ready`, and leave the source work
+  record open. Their passing tests close only control steps with `gc.outcome`;
+  they never set `gc.work_outcome=shipped` from branch-only evidence.
 - Persona review lanes: plan review and code review fan out through the
   Gas City expansion formulas `compound-plan-review` and
   `compound-code-review` (finalization through `compound-resolution`). Every

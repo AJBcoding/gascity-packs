@@ -3877,16 +3877,20 @@ class FormulaAssetTests(unittest.TestCase):
         close_source = node_description(root, steps["close-source-anchor"])
         for fragment in (
             "Read `work_dir` from the source anchor",
-            "close only `<source-anchor-id>`",
+            "update only `<source-anchor-id>`",
             "handle both an object and a",
             "`gc.work_dir` is the launcher rig",
             "points at a worktree without the",
             "gc bd show <source-anchor-id> --json",
-            "status=closed",
-            "gc.outcome=pass",
+            "gc.delivery_state=integration_ready",
+            "gc.work_commit",
+            "status remains open",
+            "in_progress",
+            "Leave the source anchor open",
+            "Never set `gc.work_outcome=shipped`",
             "if either check fails",
-            "anchor before closing this step",
-            "Do not close this step with pass while the source anchor remains open",
+            "fix the source anchor",
+            "close only this claimed workflow step with `gc.outcome=pass`",
         ):
             with self.subTest(step="close-source-anchor", fragment=fragment):
                 self.assertIn(fragment, close_source)

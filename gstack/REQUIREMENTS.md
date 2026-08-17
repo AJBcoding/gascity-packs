@@ -72,6 +72,11 @@ for every derived pack.
   `same-session` path drains `gstack-work-item` in one shared single-lane
   session with `on_item_failure = "skip_remaining"`. Both preserve the
   build-base drain lifecycle, convoy identity, and per-item evidence.
+- Source-completion contract: both gstack implementation paths preserve
+  `gc.work_base_commit`, record the focused `gc.work_commit`, submit the exact
+  source as `gc.delivery_state=integration_ready`, and leave the source work
+  record open. Proof and self-review close only control steps with
+  `gc.outcome`; they never set `gc.work_outcome=shipped`.
 - Providerless routes: every step in the pack's formulas routes via
   `gc.run_target` to a providerless pack-local agent (`gstack.*`, declared in
   `agents/*/agent.toml` with no provider pin), to the `gc.run-operator` or

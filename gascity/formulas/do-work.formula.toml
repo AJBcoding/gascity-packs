@@ -50,7 +50,7 @@ timeout = "5m"
 
 [[steps]]
 id = "close-source-anchor"
-title = "Close owned source anchor"
+title = "Submit owned source anchor for integration"
 needs = ["implement"]
 metadata = { "gc.run_target" = "gc.run-operator" }
 description_file = "../assets/workflows/do-work/close-source-anchor.md"

@@ -29,7 +29,8 @@ exists at the path recorded on the workflow root bead as
 `gc.build.implementation_summary_path`, normally `implementation-summary.md`.
 If that path is missing, absent on disk, or not a valid
 `gc.build.implementation-summary.v1` artifact, synthesize the canonical
-`implementation-summary.md` from closed implementation source anchors and their
+`implementation-summary.md` from open
+`gc.delivery_state=integration_ready` implementation source anchors and their
 recorded per-item `gc.implementation.summary_path` values. The synthesized
 artifact must be Markdown with YAML front matter, schema
 `gc.build.implementation-summary.v1`, the same trace shape and `ID`/`Status`

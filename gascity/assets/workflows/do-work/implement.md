@@ -25,8 +25,11 @@ verification, hashes, or commits, the step is invalid and must fail.
 
 Do not edit files in the launcher checkout. Implement only the owned source
 anchor boundary, run sandboxed verification from inside the worktree, and make a
-focused commit in the worktree. Leave the source anchor open for
-`close-source-anchor`; close only this implementation step when done.
+focused commit in the worktree. Leave the source anchor open for the
+`close-source-anchor` compatibility step, which verifies provenance and records
+`gc.delivery_state=integration_ready` without closing source work. Close only
+this implementation step when done. Never set `gc.work_outcome=shipped` from a
+focused commit or passing test run.
 
 Before editing, require `gc.work_base_commit` on the source anchor and verify it
 is an ancestor of worktree `HEAD`. After the focused commit and final proof

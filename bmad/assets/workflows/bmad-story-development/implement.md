@@ -11,5 +11,9 @@ source-worktree. After the approved loop produces its focused commit, record
 the exact result `HEAD` as `gc.work_commit` on the source anchor. Never replace
 that source commit with an integrated or landed commit.
 
+Leave the source anchor open for the inherited compatibility submission step,
+which records `gc.delivery_state=integration_ready` after readback. Never set `gc.work_outcome=shipped` from the focused branch, tests, self-check, or
+acceptance audit.
+
 Do not invoke provider-native subagents. Re-run or continue only through this
 Gas City graph stage's child steps.

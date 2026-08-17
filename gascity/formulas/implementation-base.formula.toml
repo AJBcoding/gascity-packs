@@ -4,7 +4,7 @@ Virtual implementation methodology contract.
 This methodology contract executes one implementation convoy or one
 drain-member source anchor and records the result. Concrete methodology packs
 override the implement step or add process-specific checks while preserving the
-source-anchor close contract.
+source-anchor integration-ready submission contract.
 """
 formula = "implementation-base"
 version = 1
@@ -48,7 +48,7 @@ timeout = "5m"
 
 [[steps]]
 id = "close-source-anchor"
-title = "Close owned source anchor"
+title = "Submit owned source anchor for integration"
 needs = ["implement"]
 metadata = { "gc.run_target" = "gc.run-operator" }
 description_file = "../assets/workflows/implementation-base/close-source-anchor.md"
