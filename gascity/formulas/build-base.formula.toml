@@ -268,3 +268,10 @@ title = "Optionally publish build result"
 needs = ["finalize"]
 metadata = { "gc.run_target" = "gc.publisher" }
 description_file = "../assets/workflows/build-base/publish.md"
+
+[[steps]]
+id = "stamp-work-records"
+title = "Stamp exact source work records after landing"
+needs = ["publish"]
+metadata = { "gc.run_target" = "gc.run-operator" }
+description_file = "../assets/workflows/build-base/stamp-work-records.md"

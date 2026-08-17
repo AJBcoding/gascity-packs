@@ -180,21 +180,27 @@ stable stage sequence that concrete build methodology packs can override:
 ```text
 prepare -> requirements -> plan -> plan-review -> decompose ->
 implement | implement-same-session -> integrate -> review -> finalize -> publish
+-> stamp-work-records
 ```
 
 The healthy delivery suffix is:
 
 ```text
-integrate -> review -> finalize -> authorized publish -> verified landing
+integrate -> review -> finalize -> authorized publish -> verified landing ->
+ephemeral exact-event work stamping
 ```
 
-Integration and publication are on-demand capabilities: an isolated integrator
-assembles immutable candidate evidence, then an ephemeral publisher acts only
-when authorized. There is no long-lived refinery role in this topology. Direct
-mode is complete only after core returns a `gcl-` event for the independently
-observed target. PR mode records `pending_external_merge` and waits for a trusted
-merge observer. Neither path stamps or closes source work as shipped in this
-phase.
+Integration, publication, and work stamping are on-demand capabilities: an
+isolated integrator assembles immutable candidate evidence; an ephemeral publisher
+acts only when authorized; and a stock ephemeral operator consumes
+only the resulting `gcl-` event. There is no long-lived refinery role in this
+topology. Direct publication completes after core independently observes the
+target and records the event; only then does `stamp-work-records` invoke
+`gc landing stamp`. PR mode records `pending_external_merge` and waits for a
+trusted merge observer, while disabled mode records `not_requested`; neither
+mode invokes stamping without an event. A stamp failure records
+`landing_recorded_stamp_pending` for exact-event replay and never rewrites the
+truthful landing result. Source work is not closed as shipped by this phase.
 
 `build-base` is internal and should not be launched directly. Use
 `build-basic` for the default Gas City implementation. It maps the base stages
@@ -904,7 +910,7 @@ Stable basic override:
 `assets/workflows/publish/preflight.md`
 
 Stable advanced steps:
-`publish` steps `preflight`, `push`, `open-pr`
+`publish` steps `preflight`, `push`, `open-pr`, `stamp-work-records`
 
 Basic example: enforce branch and PR policy.
 
@@ -939,6 +945,8 @@ The replacement can open a PR, create a release-train ticket, or request human
 approval, but it must leave a durable final report path and mode-specific
 publish/landing status for the caller. A release-train handoff must not claim a
 landing event before a trusted observer supplies the actual landed SHA.
+Preserve the inherited `stamp-work-records` successor: it consumes the event ID
+after direct landing and no-ops for pending or disabled modes.
 
 By default artifacts go under the target rig:
 

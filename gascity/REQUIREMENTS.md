@@ -125,10 +125,11 @@ top-level stages only as anchored extensions:
   produces exactly one work item.
 - Publishing and external side effects are opt-in through explicit variables or
   gated adapter steps.
-- Integration and publication are ephemeral workflow capabilities, not
-  long-lived refinery actors. The integration stage prepares immutable evidence;
-  the publisher applies explicit authorization; core independently observes the
-  target before recording landing.
+- Integration, publication, and post-landing stamping are ephemeral workflow
+  capabilities, not long-lived refinery actors. The integration stage prepares
+  immutable evidence; the publisher applies explicit authorization; core
+  independently observes the target before recording landing; then a stock
+  operator replays that exact event into its bound source stores.
 
 ## Base Stage Artifact Contracts
 
@@ -149,6 +150,7 @@ paths.
 | `review` | Produces a review verdict/report with required fixes or approval. |
 | `finalize` | Writes the final workflow report covering requirements, plan, decomposition, implementation, review attempts, risk, drift, publish status, and next action. |
 | `publish` | No-ops unless authorized. Direct mode publishes with an expected-object lease and requires `record_landing.py` to obtain a verified `gc landing record` event; PR mode records a pending external merge without claiming landing. |
+| `stamp-work-records` | Runs only after `publish` closes. With a landing event it invokes `gc landing stamp` through an ephemeral stock operator and mirrors bounded counts; without an event it no-ops. |
 
 The terminal publication-state contract is:
 
@@ -156,6 +158,15 @@ The terminal publication-state contract is:
 - pull request: `published` + `pending_external_merge` + no landing event;
 - disabled: `noop` + `not_requested`;
 - post-push verification failure: `publication_pending` + `verification_failed`.
+
+After a direct `landed` result, stamping is a separate replayable boundary:
+
+- success: `gc.build.work_stamp_status=stamped` with bounded counts;
+- failure: the landing remains truthful while
+  `gc.build.work_stamp_status=landing_recorded_stamp_pending` records the
+  recoverable bookkeeping gap;
+- PR-pending and disabled publication: no landing event, no stamp command, and
+  `gc.build.work_stamp_status=not_requested`.
 
 ## Requirements Artifact Contract
 
@@ -800,6 +811,8 @@ Proof expectation: validation requires `workflow.formula`, `producer.formula`,
 | GC-METH-BR-016 | GC-METH-US-001 | WHEN publish is authorized, THE publish stage SHALL record the mode-specific push or PR status; direct publication SHALL use the typed ready integration result and an expected-object lease and SHALL complete only after `record_landing.py` obtains a successful `gc landing record` event, while PR publication SHALL remain `pending_external_merge`. |
 | GC-METH-BR-055 | GC-METH-US-001 | IF direct publication updates the target but landing observation fails, THEN the publish stage SHALL record `publication_pending` plus `verification_failed`, preserve the integration result and exact receipt, and retry only with the byte-identical receipt so core re-observes the remote. |
 | GC-METH-BR-056 | GC-METH-US-001 | WHEN a pull request is opened, THE publish stage SHALL treat it as published but not landed and SHALL NOT create a landing receipt, emit `delivery.landed`, set a landed SHA, or close shipped work before a trusted external merge observer supplies the actual landed SHA. |
+| GC-METH-BR-057 | GC-METH-US-001 | AFTER direct publication has closed with an exact `gc.build.landing_event_id`, THE separate `stamp-work-records` stage SHALL invoke `gc landing stamp --event "$EVENT_ID" --json` through an ephemeral stock operator and SHALL mirror only bounded status and count metadata. |
+| GC-METH-BR-058 | GC-METH-US-001 | IF post-landing stamping fails, THEN THE workflow SHALL preserve the truthful landed publication evidence, record `landing_recorded_stamp_pending`, and allow exact-event replay; PR-pending and disabled publication SHALL NOT invoke stamping. |
 | GC-METH-BR-051 | GC-METH-US-001 | IF review/fix cannot reach approval because evidence is missing, a drain failed, review is blocked, report mode forbids mutation, or maximum iterations are exhausted, THEN finalization SHALL record a failing blocked outcome plus `gc.build.repair_status` and `gc.restart.*` metadata rather than closing the workflow as pass; publish no-op SHALL preserve that outcome. |
 | GC-METH-BR-017 | GC-METH-TS-003 | WHEN a downstream artifact consumes an upstream artifact, THE downstream artifact SHALL record the upstream path and content hash or revision ID. |
 | GC-METH-BR-018 | GC-METH-TS-003 | IF upstream artifacts drift after downstream work starts, THEN review and finalization SHALL surface drift and SHALL NOT silently proceed. |
@@ -844,7 +857,7 @@ Proof expectation: validation requires `workflow.formula`, `producer.formula`,
 
 | ID | Scenario | Required behavior | Evidence |
 | --- | --- | --- | --- |
-| GC-METH-001 | Base stage sequence | `build-base` defines the stable stage sequence `prepare -> requirements -> plan -> plan-review -> decompose -> implementation -> integrate -> review -> finalize -> publish`. | `formulas/build-base.formula.toml`; `tests/test_formula_assets.py::FormulaAssetTests::test_build_base_is_full_lifecycle_virtual_contract` |
+| GC-METH-001 | Base stage sequence | `build-base` defines the stable stage sequence `prepare -> requirements -> plan -> plan-review -> decompose -> implementation -> integrate -> review -> finalize -> publish -> stamp-work-records`. | `formulas/build-base.formula.toml`; `tests/test_formula_assets.py::FormulaAssetTests::test_build_base_is_full_lifecycle_virtual_contract` |
 | GC-METH-002 | Default implementation | `build-basic` extends `build-base`, is cataloged, preserves the base stage sequence, uses beginner-friendly prompts, and uses starter review fanout through `build-basic-review`. | `formulas/build-basic.formula.toml`; `formulas/build-basic-review.formula.toml`; `tests/test_formula_assets.py::FormulaAssetTests::test_build_basic_extends_full_lifecycle_base` |
 | GC-METH-003 | Stage selector compatibility | `build-base`, `github-issue-fix-base`, and `github-pr-review` expose methodology selector vars with defaults that point at the base implementation. | `tests/test_formula_assets.py::FormulaAssetTests::test_entrypoint_adapters_expose_methodology_formula_vars` |
 | GC-METH-004 | Virtual stage contracts | `planning-base`, `decomposition-base`, `implementation-base`, `implementation-item-base`, `integration-base`, `code-review-base`, and `fix-loop-base` are internal, non-catalog base contracts with shadowable step assets. | `tests/test_formula_assets.py::FormulaAssetTests::test_methodology_stage_contracts_are_virtual_and_shadowable` |
@@ -861,6 +874,7 @@ Proof expectation: validation requires `workflow.formula`, `producer.formula`,
 | GC-METH-015 | Neutral artifact metadata | Artifacts record workflow, methodology, and producer metadata without owner or role fields. | this ledger; future schema/gate tests |
 | GC-METH-016 | Nested continuation suffixes | `build-from-requirements-base -> build-from-plan-base -> build-from-decompose-base -> build-from-convoy-base -> build-from-review-base` form a nested suffix chain. Each suffix validates its prerequisite, performs its owned work, and hands off to the next suffix. Cataloged `build-from-*` wrappers expose the default Gas City behavior. | `formulas/build-from-*-base.formula.toml`; `formulas/build-from-*.formula.toml`; `tests/test_formula_assets.py::FormulaAssetTests::test_build_continuation_bases_form_nested_suffix_chain`; `tests/test_formula_assets.py::FormulaAssetTests::test_default_continuation_entrypoints_extend_suffix_bases` |
 | GC-METH-017 | Verified publication | An ephemeral publisher maps direct, PR, disabled, and post-push-failure modes to distinct landing states; only exact core observation of an approved candidate produces a `gcl-` landing event. | `assets/workflows/build-base/publish.md`; `assets/scripts/record_landing.py`; `tests/test_record_landing.py`; `tests/test_formula_assets.py::FormulaAssetTests::test_build_publish_surfaces_require_verified_landing_contract` |
+| GC-METH-018 | Portable post-landing stamping | A separate ephemeral stock operator consumes only the exact landing event ID, invokes `gc landing stamp`, mirrors bounded counts, no-ops without an event, and leaves failed stamping as replayable `landing_recorded_stamp_pending` without undoing landing. | `assets/workflows/build-base/stamp-work-records.md`; `tests/test_formula_assets.py::FormulaAssetTests::test_post_landing_stamping_is_ephemeral_and_preserved_by_derived_builds` |
 
 ## Deferred Follow-Up Requirements
 

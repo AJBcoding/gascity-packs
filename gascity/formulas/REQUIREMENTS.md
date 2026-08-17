@@ -58,9 +58,9 @@ For every formula change:
 - `build-base`, `build-basic`, `build-from-*-base`, `build-from-*`, and
   concrete derived top-level build formulas declare formal
   `[metadata.gc.methodology]` compatibility metadata.
-- Planning, decomposition, implementation, review, fix, and publish formulas
-  preserve `interaction_mode` and `review_mode` semantics defined by
-  `../REQUIREMENTS.md`.
+- Planning, decomposition, implementation, review, fix, publish, and
+  post-landing stamping formulas preserve `interaction_mode`, `review_mode`,
+  and the separate exact-event replay boundary defined by `../REQUIREMENTS.md`.
 - Artifact-producing formulas invoke the shared base artifact validator through
   explicit formula check steps and route failed validation back for bounded
   schema repair.
@@ -122,6 +122,7 @@ this ledger against the `FORMULAS` constant and formula directory.
 | GC-BF-BR-011 | GC-BF-US-002 | WHEN shared artifact validation fails, THE formula graph SHALL route back to the producer for bounded repair or stop as `blocked` after finite attempts. |
 | GC-BF-BR-012 | GC-BF-US-002 | WHEN formula output includes traceability, THE formula SHALL preserve YAML coverage as the machine-readable source and mirrored markdown coverage for humans. |
 | GC-BF-BR-013 | GC-BF-US-002 | WHEN a continuation review, drain, or repair stage cannot reach approval, THE formula graph SHALL record `gc.build.repair_status`, `gc.restart.*` metadata, and a failing blocked outcome instead of allowing finalize or publish no-op to close the workflow as pass. |
+| GC-BF-BR-014 | GC-BF-US-001 | WHEN a formula can produce a verified landing event, THE formula graph SHALL preserve a separate `stamp-work-records` step after publication, route it to `gc.run-operator`, and no-op when no event ID exists. |
 
 ## Scenario Ledger
 
@@ -129,7 +130,7 @@ this ledger against the `FORMULAS` constant and formula directory.
 
 | ID | Formula | Type | Required behavior | Evidence |
 | --- | --- | --- | --- | --- |
-| GC-BF-001 | `build-base` | Virtual targeted full-lifecycle contract | Defines the stable build sequence including typed ephemeral integration before review, selector and mode variables, methodology metadata, implementation strategy, artifact repair gates, review/fix, finalization, and verified publication states that concrete methodology packs extend. | `build-base.formula.toml`; `../tests/test_formula_assets.py` |
+| GC-BF-001 | `build-base` | Virtual targeted full-lifecycle contract | Defines the stable build sequence including typed ephemeral integration before review, selector and mode variables, methodology metadata, implementation strategy, artifact repair gates, review/fix, finalization, verified publication, and separate exact-event work stamping that concrete methodology packs extend. | `build-base.formula.toml`; `../tests/test_formula_assets.py` |
 | GC-BF-002 | `planning-base` | Virtual targetless planning contract | Produces approved requirements and implementation-plan artifacts through prepare, requirements, plan, and plan-review stages while preserving strict artifact shape, approval states, hashes, coverage, validator repair, and mode behavior for adapters. | `planning-base.formula.toml`; `../tests/test_formula_assets.py` |
 | GC-BF-003 | `decomposition-base` | Virtual targetless decomposition contract | Converts an approved plan into durable work units and implementation convoy identity that downstream drain or convoy-step implementation strategies consume, after validating decomposition schema, coverage, and upstream hashes. | `decomposition-base.formula.toml`; `../tests/test_formula_assets.py` |
 | GC-BF-004 | `implementation-base` | Virtual targeted implementation contract | Executes one implementation source anchor with prepare-worktree, implement, and close-source-anchor stages while preserving source-anchor close, work-item evidence, requirement coverage, and neutral producer metadata. | `implementation-base.formula.toml`; `../tests/test_formula_assets.py` |
@@ -150,7 +151,7 @@ this ledger against the `FORMULAS` constant and formula directory.
 
 | ID | Formula | Type | Required behavior | Evidence |
 | --- | --- | --- | --- | --- |
-| GC-BF-025 | `build-from-review-base` | Virtual targetless review suffix | Requires a typed ready integration result, runs the selected code-review, repairs or records a restart handoff for findings, finalizes without converting blocked repair states to pass, and optionally publishes. Higher suffixes hand off through `prepare-review`. | `build-from-review-base.formula.toml`; `../tests/test_formula_assets.py::FormulaAssetTests::test_build_continuation_bases_form_nested_suffix_chain`; `../tests/test_formula_assets.py::FormulaAssetTests::test_build_from_review_blocked_results_are_healable_not_passed`; `../tests/test_formula_assets.py::FormulaAssetTests::test_producer_stages_gate_artifacts_with_bounded_repair` |
+| GC-BF-025 | `build-from-review-base` | Virtual targetless review suffix | Requires a typed ready integration result, runs the selected code-review, repairs or records a restart handoff for findings, finalizes without converting blocked repair states to pass, optionally publishes, and preserves the separate post-landing stamp boundary. Higher suffixes hand off through `prepare-review`. | `build-from-review-base.formula.toml`; `../tests/test_formula_assets.py::FormulaAssetTests::test_build_continuation_bases_form_nested_suffix_chain`; `../tests/test_formula_assets.py::FormulaAssetTests::test_post_landing_stamping_is_ephemeral_and_preserved_by_derived_builds`; `../tests/test_formula_assets.py::FormulaAssetTests::test_build_from_review_blocked_results_are_healable_not_passed`; `../tests/test_formula_assets.py::FormulaAssetTests::test_producer_stages_gate_artifacts_with_bounded_repair` |
 | GC-BF-026 | `build-from-convoy-base` | Virtual targetless implementation suffix | Validates or records an implementation convoy, drains implementation work through the selected drain policy, assembles one typed shadow candidate, and hands that evidence to `build-from-review-base`. | `build-from-convoy-base.formula.toml`; `../tests/test_formula_assets.py::FormulaAssetTests::test_build_continuation_bases_form_nested_suffix_chain` |
 | GC-BF-027 | `build-from-decompose-base` | Virtual targetless decompose suffix | Validates existing approved requirements, plan, and plan-review artifacts; starts at `decompose`; creates or adopts an implementation convoy; and hands off to `build-from-convoy-base` without rerunning requirements, plan, or plan-review. | `build-from-decompose-base.formula.toml`; `../tests/test_formula_assets.py::FormulaAssetTests::test_build_from_decompose_base_is_reusable_suffix_contract`; `../tests/test_formula_assets.py::FormulaAssetTests::test_producer_stages_gate_artifacts_with_bounded_repair` |
 | GC-BF-028 | `build-from-plan-base` | Virtual targetless plan suffix | Validates approved requirements, produces or reuses an implementation plan and plan-review verdict, and hands off to `build-from-decompose-base`. | `build-from-plan-base.formula.toml`; `../tests/test_formula_assets.py::FormulaAssetTests::test_build_continuation_bases_form_nested_suffix_chain`; `../tests/test_formula_assets.py::FormulaAssetTests::test_producer_stages_gate_artifacts_with_bounded_repair` |
@@ -183,7 +184,7 @@ this ledger against the `FORMULAS` constant and formula directory.
 | ID | Formula | Type | Required behavior | Evidence |
 | --- | --- | --- | --- | --- |
 | GC-BF-017 | `design-review` | Cataloged targeted design review | Reviews and finalizes a design document through a body scope and cleanup finalizer while preserving notification semantics. | `design-review.formula.toml`; `../tests/test_formula_assets.py` |
-| GC-BF-018 | `publish` | Targetless internal publication helper | Runs preflight and authorized publication only. Direct mode uses the typed integration result and expected-object lease, then delegates exact remote observation and typed event creation through `record_landing.py` to core `gc landing record`; PR mode records `pending_external_merge`, and disabled mode records `not_requested`. | `publish.formula.toml`; `../assets/scripts/record_landing.py`; `../tests/test_record_landing.py`; `../tests/test_formula_assets.py` |
+| GC-BF-018 | `publish` | Targetless internal publication helper | Runs preflight and authorized publication, then a separate post-publication stamp step. Direct mode uses the typed integration result and expected-object lease, delegates exact observation and event creation through `record_landing.py` and core `gc landing record`, then invokes exact-event stamping; PR and disabled modes record no event and the stamp step no-ops. | `publish.formula.toml`; `../assets/scripts/record_landing.py`; `../assets/workflows/build-base/stamp-work-records.md`; `../tests/test_record_landing.py`; `../tests/test_formula_assets.py` |
 
 ### GitHub Adapters
 

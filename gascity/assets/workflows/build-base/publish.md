@@ -58,3 +58,6 @@ There are exactly three modes:
 Write the mode-specific publish result under the artifact root and mirror its
 metadata on the workflow root and this step. Close this step only after the
 direct landing event, PR-pending state, or explicit disabled state is recorded.
+Do not invoke `gc landing stamp` from this publish step. The dependent
+`stamp-work-records` step owns that replayable boundary after publication has
+truthfully completed as landed, pending external merge, or not requested.

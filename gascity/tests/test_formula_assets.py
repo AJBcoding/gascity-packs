@@ -94,6 +94,7 @@ BUILD_BASE_STEPS = [
     "review",
     "finalize",
     "publish",
+    "stamp-work-records",
 ]
 
 BUILD_FROM_REVIEW_STEPS = {
@@ -102,6 +103,7 @@ BUILD_FROM_REVIEW_STEPS = {
     "repair-review",
     "finalize",
     "publish",
+    "stamp-work-records",
 }
 
 BUILD_FROM_CONVOY_STEPS = BUILD_FROM_REVIEW_STEPS | {
@@ -768,6 +770,9 @@ class FormulaAssetTests(unittest.TestCase):
             "post-push verification failure: `publication_pending` + `verification_failed`",
             "record_landing.py",
             "gc landing record",
+            "stamp-work-records",
+            "gc landing stamp",
+            "landing_recorded_stamp_pending",
         ):
             with self.subTest(document="requirements", fragment=fragment):
                 self.assertIn(fragment, requirements)
@@ -782,6 +787,8 @@ class FormulaAssetTests(unittest.TestCase):
             "pending_external_merge",
             "does not produce a typed integration result",
             "legacy and non-qualifying",
+            "stamp-work-records",
+            "landing_recorded_stamp_pending",
         ):
             with self.subTest(document="README", fragment=fragment):
                 self.assertIn(fragment, readme)
@@ -813,6 +820,78 @@ class FormulaAssetTests(unittest.TestCase):
                 self.assertLess(text.index("force-with-lease"), text.index("record_landing.py record-direct"))
                 self.assertIn("must not invoke `record_landing.py`", text)
                 self.assertIn("must not emit `delivery.landed`", text)
+                self.assertIn("Do not invoke `gc landing stamp`", text)
+                self.assertIn("`stamp-work-records` step", text)
+
+    def test_post_landing_stamping_is_ephemeral_and_preserved_by_derived_builds(self) -> None:
+        gascity_root = pathlib.Path(__file__).resolve().parents[1]
+        packs_root = gascity_root.parent
+        assets = (
+            gascity_root / "assets/workflows/build-base/stamp-work-records.md",
+            gascity_root / "assets/workflows/build-from-review-base/stamp-work-records.md",
+            gascity_root / "assets/workflows/publish/stamp-work-records.md",
+        )
+        for asset in assets:
+            text = asset.read_text(encoding="utf-8")
+            for fragment in (
+                "gc.build.landing_event_id",
+                'gc landing stamp --event "$EVENT_ID" --json',
+                "gc.build.work_stamp_status=stamped",
+                "gc.build.work_stamp_stamped",
+                "gc.build.work_stamp_already_stamped",
+                "gc.build.work_stamp_conflicts",
+                "landing_recorded_stamp_pending",
+                "pending_external_merge",
+                "not_requested",
+                "gc.build.landing_status=landed",
+                "gc bd update",
+                "gc bd close",
+            ):
+                with self.subTest(asset=asset, fragment=fragment):
+                    self.assertIn(fragment, text)
+            for forbidden in (
+                "integration_result_path",
+                "landing_receipt_path",
+                "work_bead_ids",
+                "refinery",
+                "mysql",
+            ):
+                with self.subTest(asset=asset, forbidden=forbidden):
+                    self.assertNotIn(forbidden, text.lower())
+
+        direct_bases = (
+            load_formula(gascity_root, "build-base"),
+            load_formula(gascity_root, "build-from-review-base"),
+            load_formula(gascity_root, "publish"),
+        )
+        for formula in direct_bases:
+            steps = {step["id"]: step for step in formula["steps"]}
+            with self.subTest(formula=formula["formula"]):
+                stamp = steps["stamp-work-records"]
+                self.assertEqual(stamp["needs"], ["publish"] if formula["formula"] != "publish" else ["open-pr"])
+                self.assertEqual(stamp["metadata"]["gc.run_target"], "gc.run-operator")
+
+        derived = {
+            "build-basic": [gascity_root / "formulas"],
+            "build-from-requirements": [gascity_root / "formulas"],
+            "build-from-plan": [gascity_root / "formulas"],
+            "build-from-decompose": [gascity_root / "formulas"],
+            "build-from-convoy": [gascity_root / "formulas"],
+            "build-from-review": [gascity_root / "formulas"],
+            "compound-build": [gascity_root / "formulas", packs_root / "compound-engineering/formulas"],
+            "superpowers-build": [gascity_root / "formulas", packs_root / "superpowers/formulas"],
+            "bmad-build": [gascity_root / "formulas", packs_root / "bmad/formulas"],
+            "gstack-build": [gascity_root / "formulas", packs_root / "gstack/formulas"],
+        }
+        for formula_name, formula_dirs in derived.items():
+            resolved = resolve_formula_from_dirs(formula_dirs, formula_name)
+            steps = {step["id"]: step for step in resolved["steps"]}
+            with self.subTest(derived=formula_name):
+                self.assertEqual(steps["stamp-work-records"]["needs"], ["publish"])
+                self.assertEqual(
+                    steps["stamp-work-records"]["metadata"]["gc.run_target"],
+                    "gc.run-operator",
+                )
 
     def test_expected_formula_set_is_convoy_first(self) -> None:
         root = pathlib.Path(__file__).resolve().parents[1]

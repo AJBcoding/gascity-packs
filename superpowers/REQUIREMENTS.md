@@ -18,10 +18,13 @@ for every derived pack.
 - Formula contract: `superpowers/formulas/superpowers-build.formula.toml`
   declares `extends = ["build-base"]` and preserves the inherited anchor order
   `prepare -> requirements -> plan -> plan-review -> decompose ->
-  implement/implement-same-session -> review -> finalize -> publish`. The
+  implement/implement-same-session -> review -> finalize -> publish ->
+  stamp-work-records`. The
   child overrides `requirements`, `plan`, `plan-review`, `decompose`,
   `implement`, `implement-same-session`, `review`, and `finalize` under their
-  base ids in the base sequence; `prepare` and `publish` remain inherited.
+  base ids in the base sequence; `prepare`, `publish`, and
+  `stamp-work-records` remain inherited. The inherited stamp step consumes only
+  an exact landing event ID after publication.
   `superpowers-build` adds no top-level stage of its own, and no base anchor
   is renamed, skipped, or reordered.
 - Pack-added structure: the only pack-added steps live inside the item
@@ -179,7 +182,7 @@ assert set(child_order) == {
     'requirements', 'plan', 'plan-review', 'decompose',
     'implement', 'implement-same-session', 'review', 'finalize',
 }
-assert {'prepare', 'publish'} <= set(base_order) - set(child_order)
+assert {'prepare', 'publish', 'stamp-work-records'} <= set(base_order) - set(child_order)
 
 tdd = ['write-failing-test', 'verify-test-fails', 'implement-change',
        'verify-test-passes', 'task-review', 'record-item-result']

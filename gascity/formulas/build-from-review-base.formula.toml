@@ -140,3 +140,10 @@ title = "Optionally publish continuation result"
 needs = ["finalize"]
 metadata = { "gc.run_target" = "gc.publisher" }
 description_file = "../assets/workflows/build-from-review-base/publish.md"
+
+[[steps]]
+id = "stamp-work-records"
+title = "Stamp exact source work records after landing"
+needs = ["publish"]
+metadata = { "gc.run_target" = "gc.run-operator" }
+description_file = "../assets/workflows/build-from-review-base/stamp-work-records.md"

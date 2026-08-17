@@ -18,10 +18,13 @@ for every derived pack.
 - Formula contract: `gstack/formulas/gstack-build.formula.toml` declares
   `extends = ["build-base"]` and preserves the inherited anchor order
   `prepare -> requirements -> plan -> plan-review -> decompose ->
-  implement/implement-same-session -> review -> finalize -> publish`. The
+  implement/implement-same-session -> review -> finalize -> publish ->
+  stamp-work-records`. The
   child overrides `requirements`, `plan`, `plan-review`, `decompose`,
   `implement`, `implement-same-session`, `review`, `finalize`, and `publish`
-  under their base ids in the base sequence; `prepare` remains inherited. No
+  under their base ids in the base sequence; `prepare` and
+  `stamp-work-records` remain inherited. Its inherited stamp successor consumes
+  only the exact landing event ID produced by the gstack publish override. No
   base anchor is renamed, skipped, or reordered.
 - QA and release-readiness anchors: `qa` and `release-readiness` are the only
   pack-added steps in `gstack-build`, and they stay anchored after `review`
@@ -158,7 +161,7 @@ assert set(child_order) - added == {
     'requirements', 'plan', 'plan-review', 'decompose',
     'implement', 'implement-same-session', 'review', 'finalize', 'publish',
 }
-assert set(base_order) - set(child_order) == {'prepare'}
+assert set(base_order) - set(child_order) == {'prepare', 'stamp-work-records'}
 steps = {step['id']: step for step in child['steps']}
 assert steps['qa']['needs'] == ['review']
 assert steps['release-readiness']['needs'] == ['qa']

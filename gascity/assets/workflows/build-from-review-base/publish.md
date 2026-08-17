@@ -53,3 +53,7 @@ supplies the actual landed SHA.
 When both controls are false, record the existing no-op state and
 `gc.build.landing_status=not_requested` without altering the finalized workflow
 outcome.
+
+Do not invoke `gc landing stamp` from this publish step. Close publication only
+after its truthful mode-specific landing state is recorded; the dependent
+`stamp-work-records` step owns post-landing stamping and replay.

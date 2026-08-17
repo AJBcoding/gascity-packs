@@ -44,3 +44,10 @@ title = "Open PR if authorized"
 needs = ["push"]
 metadata = { "gc.run_target" = "gc.publisher" }
 description_file = "../assets/workflows/publish/open-pr.md"
+
+[[steps]]
+id = "stamp-work-records"
+title = "Stamp exact source work records after landing"
+needs = ["open-pr"]
+metadata = { "gc.run_target" = "gc.run-operator" }
+description_file = "../assets/workflows/publish/stamp-work-records.md"
