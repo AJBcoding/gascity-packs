@@ -4,10 +4,12 @@ contract. Concrete overrides must preserve every boundary below.
 Read `gc.build.integration_result_path`, `gc.build.integration_result_hash`,
 `gc.build.final_report_path`, `gc.var.push`, and `gc.var.open_pr` from the
 workflow root. Any enabled publication requires an approved
-`gc.build.integration-result.v1` with `integration.outcome=ready`; use its
+`gc.build.integration-result.v2` with `integration.outcome=ready`; use its
 manifest remote, target ref, base SHA, candidate SHA, and artifact root exactly.
 The recorded result hash must equal the file's actual hash. Never substitute a
 worktree HEAD, current branch, or launcher-rig ref.
+Legacy v1 results remain recordable, but their adapter result is explicitly
+`work_record_stampability=not_stampable`; never scan stores to compensate.
 
 There are exactly three modes:
 

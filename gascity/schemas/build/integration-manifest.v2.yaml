@@ -1,0 +1,39 @@
+# Immutable machine/human handoff for assembling one stampable review candidate.
+# Every source row binds its canonical city/rig store and source work commit.
+schema_id: gc.build.integration-manifest.v2
+artifact: integration-manifest
+allowed_statuses:
+  - draft
+  - approved
+  - blocked
+  - superseded
+required_front_matter:
+  - schema
+  - workflow.id
+  - workflow.formula
+  - methodology.pack
+  - methodology.name
+  - producer.formula
+  - producer.stage
+  - producer.attempt
+  - status
+  - integration.repository
+  - integration.artifact_root
+  - integration.remote
+  - integration.target_ref
+  - integration.base_sha
+  - integration.sources
+  - integration.verification
+  - trace
+coverage_statuses:
+  - covered
+  - not_applicable
+  - deferred
+  - blocked
+  - out_of_scope
+  - superseded
+required_sections:
+  - Candidate
+  - Sources
+  - Verification
+  - Safety

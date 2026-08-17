@@ -268,11 +268,11 @@ AGGREGATE_SUMMARY_GATE = (
     "gc.implementation.summary_path,gc.var.summary_path",
 )
 INTEGRATION_MANIFEST_GATE = (
-    "gc.build.integration-manifest.v1",
+    "gc.build.integration-manifest.v2",
     "gc.build.integration_manifest_path,gc.var.integration_manifest_path",
 )
 INTEGRATION_RESULT_GATE = (
-    "gc.build.integration-result.v1",
+    "gc.build.integration-result.v2",
     "gc.build.integration_result_path,gc.var.integration_result_path",
 )
 
@@ -1988,7 +1988,7 @@ class FormulaAssetTests(unittest.TestCase):
             "gc.outcome=fail",
             "Do not close the workflow root with `gc.outcome=pass`",
             "Publishing disabled or no-op status must never convert",
-            "gc.build.integration-result.v1",
+            "gc.build.integration-result.v2",
             "gc.build.integration_result_path",
         ):
             with self.subTest(fragment=fragment):

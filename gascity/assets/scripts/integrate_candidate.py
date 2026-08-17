@@ -19,6 +19,8 @@ import validate_build_artifact
 @dataclass(frozen=True)
 class SourceRecord:
     bead_id: str
+    store_ref: str | None
+    work_commit: str | None
     base_sha: str
     result_sha: str
     dependencies: tuple[str, ...]
@@ -31,6 +33,7 @@ class SourceRecord:
 @dataclass(frozen=True)
 class IntegrationManifest:
     path: Path
+    schema_version: int
     workflow: dict[str, Any]
     methodology: dict[str, Any]
     producer_attempt: int
@@ -65,13 +68,17 @@ def load_manifest(path: Path) -> IntegrationManifest:
     resolved_path = path.resolve(strict=True)
     artifact = validate_build_artifact.validate_artifact_text(
         resolved_path.read_text(encoding="utf-8"),
-        expected_schema="gc.build.integration-manifest.v1",
     )
+    if artifact.schema_id not in {"gc.build.integration-manifest.v1", "gc.build.integration-manifest.v2"}:
+        raise IntegrationError(f"unsupported integration manifest schema {artifact.schema_id}")
+    schema_version = 2 if artifact.schema_id.endswith(".v2") else 1
     front = artifact.front_matter
     integration = front["integration"]
     sources = tuple(
         SourceRecord(
             bead_id=source["bead_id"],
+            store_ref=source.get("store_ref"),
+            work_commit=source.get("work_commit"),
             base_sha=source["base_sha"],
             result_sha=source["result_sha"],
             dependencies=tuple(source["dependencies"]),
@@ -84,6 +91,7 @@ def load_manifest(path: Path) -> IntegrationManifest:
     )
     return IntegrationManifest(
         path=resolved_path,
+        schema_version=schema_version,
         workflow=front["workflow"],
         methodology=front["methodology"],
         producer_attempt=front["producer"]["attempt"],
@@ -163,7 +171,7 @@ def result_document(
 ) -> str:
     manifest_hash = f"sha256:{hashlib.sha256(manifest.path.read_bytes()).hexdigest()}"
     front_matter = {
-        "schema": "gc.build.integration-result.v1",
+        "schema": f"gc.build.integration-result.v{manifest.schema_version}",
         "workflow": manifest.workflow,
         "methodology": manifest.methodology,
         "producer": {
@@ -223,7 +231,6 @@ def result_document(
 def write_result(path: Path, document: str) -> None:
     validate_build_artifact.validate_artifact_text(
         document,
-        expected_schema="gc.build.integration-result.v1",
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp")
@@ -299,13 +306,15 @@ def assemble(manifest: IntegrationManifest, result_path: Path) -> int:
                 ),
             )
             return 1
-        source_map.append(
-            {
-                "bead_id": bead_id,
-                "source_sha": source.result_sha,
-                "integrated_sha": run_git(scratch, "rev-parse", "HEAD").stdout.strip(),
-            }
-        )
+        source_result = {
+            "bead_id": bead_id,
+            "source_sha": source.result_sha,
+            "integrated_sha": run_git(scratch, "rev-parse", "HEAD").stdout.strip(),
+        }
+        if manifest.schema_version == 2:
+            source_result["store_ref"] = source.store_ref
+            source_result["work_commit"] = source.work_commit
+        source_map.append(source_result)
 
     verification: list[dict[str, Any]] = []
     clean_env = {key: value for key, value in os.environ.items() if not key.startswith("GC_")}
