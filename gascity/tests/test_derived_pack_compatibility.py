@@ -220,9 +220,15 @@ def contains_unsafe_shipped_stamp(text: str) -> bool:
                 payload = token.split("=", 1)[1]
             else:
                 continue
-            if payload.startswith("@"):
+            resolved_file = payload.startswith("@")
+            if resolved_file:
                 payload = heredoc_files.get(payload[1:], "")
-            fallback_text = token if "=" in token else token + " " + payload
+            if resolved_file:
+                fallback_text = token.split("=", 1)[0] + " " + payload
+            elif "=" in token:
+                fallback_text = token
+            else:
+                fallback_text = token + " " + payload
             if _json_ships(payload) or SHIPPED_STAMP_COMMAND_PATTERNS[1].search(
                 fallback_text
             ):
@@ -265,6 +271,10 @@ UNSAFE_SHIPPED_STAMP_SPELLINGS = (
     '{"gc.work_outcome": "shipped"}\n'
     "EOF\n"
     "gc bd update gc-123 --metadata @stamp.json",
+    "cat > stamp.json <<'EOF'\n"
+    "{gc.work_outcome: shipped}\n"
+    "EOF\n"
+    "gc bd update gc-123 --metadata=@stamp.json",
 )
 
 # Exercised by ShippedStampGuardPatternTests: legitimate spellings from real
