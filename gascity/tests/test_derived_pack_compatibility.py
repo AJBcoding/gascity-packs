@@ -142,8 +142,13 @@ SHIPPED_STAMP_COMMAND_PATTERNS = (
     ),
 )
 
+SHELL_WORD_SEPARATOR = r"(?:[ \t]|\\\r?\n)+"
 MUTATING_COMMAND_CONTEXT = re.compile(
-    r"(?m)(?:^|[;&|])[ \t]*gc[ \t]+bd[ \t]+(?:update|create)\b"
+    r"(?m)(?:^|[;&|])[ \t]*gc"
+    + SHELL_WORD_SEPARATOR
+    + r"bd"
+    + SHELL_WORD_SEPARATOR
+    + r"(?:update|create)\b"
 )
 HEREDOC_FILE = re.compile(
     r"(?ms)^[ \t]*cat[ \t]+>[ \t]*[\"']?(?P<path>[^ \t\"';]+)[\"']?"
@@ -202,6 +207,8 @@ def contains_unsafe_shipped_stamp(text: str) -> bool:
     for command in _shell_command_spans(text):
         if SHIPPED_STAMP_COMMAND_PATTERNS[0].search(command):
             return True
+        if SHIPPED_STAMP_COMMAND_PATTERNS[1].search(command):
+            return True
         try:
             tokens = [token for token in shlex.split(command) if token != "\n"]
         except ValueError:
@@ -215,8 +222,9 @@ def contains_unsafe_shipped_stamp(text: str) -> bool:
                 continue
             if payload.startswith("@"):
                 payload = heredoc_files.get(payload[1:], "")
+            fallback_text = token if "=" in token else token + " " + payload
             if _json_ships(payload) or SHIPPED_STAMP_COMMAND_PATTERNS[1].search(
-                token + " " + payload
+                fallback_text
             ):
                 return True
     return False
@@ -247,6 +255,9 @@ UNSAFE_SHIPPED_STAMP_SPELLINGS = (
     "\"gc.work_outcome\": \"shipped\"}'",
     "gc bd update gc-123 --metadata '{\n  \"gc.work_outcome\": \"shipped\"\n}'",
     "gc bd update gc-123 --metadata '{gc.work_outcome: shipped}'",
+    "gc bd update gc-123 --metadata={gc.work_outcome: shipped}",
+    "gc \\\n  bd update gc-123 --set-metadata gc.work_outcome=shipped",
+    "gc bd \\\n  update gc-123 --set-metadata gc.work_outcome=shipped",
     # Unicode-escaped JSON key/value must decode to the same prohibited stamp.
     'gc bd update gc-123 --metadata \'{"gc\\u002ework_outcome":"shipped"}\'',
     'gc bd update gc-123 --metadata \'{"gc.work_outcome":"shipp\\u0065d"}\'',
