@@ -15,8 +15,10 @@ any pack asset.
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
+import shlex
 import tomllib
 import unittest
 
@@ -121,10 +123,9 @@ SHIPPED_STAMP_FLAG = r"--(?:set-)?metadata(?:=|(?:[ \t]|\\\r?\n)+)"
 
 # Every command spelling that would stamp `gc.work_outcome=shipped` on a
 # source anchor from an implementation override. Guard prose such as
-# "Never set `gc.work_outcome=shipped`", the bare ledger fragment
-# `gc.work_outcome=shipped`, and post-landing transition prose all stay
-# legal: none of them pairs the metadata flag (or a quoted JSON pair) with
-# the shipped value.
+# "Never set `gc.work_outcome=shipped`", the bare ledger fragment, and
+# post-landing transition prose all stay legal because scanning starts only at
+# a shell command beginning with `gc bd update` or `gc bd create`.
 SHIPPED_STAMP_COMMAND_PATTERNS = (
     # key=value payload: --set-metadata gc.work_outcome=shipped in any
     # quoting/equals/continuation variant, or the same payload handed to
@@ -132,22 +133,93 @@ SHIPPED_STAMP_COMMAND_PATTERNS = (
     re.compile(
         SHIPPED_STAMP_FLAG + r"[\"'\\]*gc\.work_outcome[\"'\\]*=[\"'\\]*shipped"
     ),
-    # Whole-object JSON payload: --metadata '{"gc.work_outcome": "shipped"}'
-    # with any whitespace, escaped quotes, other keys before it, or one
-    # nested-object value ahead of the key. The interior scan cannot cross
-    # the object's closing brace, so a JSON object elsewhere in an asset
-    # never chains onto later prose.
+    # Whole-object JSON payload fallback for malformed JSON. Valid JSON is
+    # parsed below so Unicode escapes normalize before the key/value check.
     re.compile(
         SHIPPED_STAMP_FLAG
         + r"[\"'\\]*\{(?:[^{}]|\{[^{}]*\})*"
         + r"gc\.work_outcome[\"'\\]*\s*:\s*[\"'\\]*shipped"
     ),
-    # Bare JSON pair "gc.work_outcome": "shipped", quoted like JSON, anywhere
-    # in the asset. Catches payloads routed through `--metadata @file.json`
-    # heredocs and any future JSON-carrying flag. Prose keeps the backticked
-    # `gc.work_outcome=shipped` spelling, so it never matches this.
-    re.compile(r"[\"'\\]+gc\.work_outcome[\"'\\]+\s*:\s*[\"'\\]+shipped"),
 )
+
+MUTATING_COMMAND_CONTEXT = re.compile(
+    r"(?m)(?:^|[;&|])[ \t]*gc[ \t]+bd[ \t]+(?:update|create)\b"
+)
+HEREDOC_FILE = re.compile(
+    r"(?ms)^[ \t]*cat[ \t]+>[ \t]*[\"']?(?P<path>[^ \t\"';]+)[\"']?"
+    r"[ \t]+<<[ \t]*[\"']?(?P<delimiter>[A-Za-z_][\w-]*)[\"']?[ \t]*\n"
+    r"(?P<body>.*?)^[ \t]*(?P=delimiter)[ \t]*$"
+)
+
+
+def _shell_command_spans(text: str):
+    """Yield executable gc bd update/create command spans, including continuations."""
+    for match in MUTATING_COMMAND_CONTEXT.finditer(text):
+        start = match.start()
+        index = match.end()
+        quote: str | None = None
+        escaped = False
+        braces = 0
+        while index < len(text):
+            char = text[index]
+            if escaped:
+                escaped = False
+            elif char == "\\" and quote != "'":
+                escaped = True
+            elif quote:
+                if char == quote:
+                    quote = None
+            elif char in "'\"":
+                quote = char
+            elif char == "{":
+                braces += 1
+            elif char == "}" and braces:
+                braces -= 1
+            elif char in "\n;" and not braces:
+                break
+            index += 1
+        yield text[start:index]
+
+
+def _declared_heredoc_files(text: str) -> dict[str, str]:
+    return {
+        match.group("path"): match.group("body")
+        for match in HEREDOC_FILE.finditer(text)
+    }
+
+
+def _json_ships(payload: str) -> bool:
+    try:
+        value = json.loads(payload)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(value, dict) and value.get("gc.work_outcome") == "shipped"
+
+
+def contains_unsafe_shipped_stamp(text: str) -> bool:
+    """Reject shipped metadata only when attached to an executable mutation."""
+    heredoc_files = _declared_heredoc_files(text)
+    for command in _shell_command_spans(text):
+        if SHIPPED_STAMP_COMMAND_PATTERNS[0].search(command):
+            return True
+        try:
+            tokens = [token for token in shlex.split(command) if token != "\n"]
+        except ValueError:
+            tokens = []
+        for index, token in enumerate(tokens):
+            if token in ("--metadata", "--set-metadata"):
+                payload = tokens[index + 1] if index + 1 < len(tokens) else ""
+            elif token.startswith("--metadata=") or token.startswith("--set-metadata="):
+                payload = token.split("=", 1)[1]
+            else:
+                continue
+            if payload.startswith("@"):
+                payload = heredoc_files.get(payload[1:], "")
+            if _json_ships(payload) or SHIPPED_STAMP_COMMAND_PATTERNS[1].search(
+                token + " " + payload
+            ):
+                return True
+    return False
 
 # Exercised by ShippedStampGuardPatternTests: command spellings the guard
 # must reject even though none appears in a current asset.
@@ -175,6 +247,9 @@ UNSAFE_SHIPPED_STAMP_SPELLINGS = (
     "\"gc.work_outcome\": \"shipped\"}'",
     "gc bd update gc-123 --metadata '{\n  \"gc.work_outcome\": \"shipped\"\n}'",
     "gc bd update gc-123 --metadata '{gc.work_outcome: shipped}'",
+    # Unicode-escaped JSON key/value must decode to the same prohibited stamp.
+    'gc bd update gc-123 --metadata \'{"gc\\u002ework_outcome":"shipped"}\'',
+    'gc bd update gc-123 --metadata \'{"gc.work_outcome":"shipp\\u0065d"}\'',
     "cat > stamp.json <<'EOF'\n"
     '{"gc.work_outcome": "shipped"}\n'
     "EOF\n"
@@ -192,6 +267,8 @@ SAFE_SHIPPED_PROSE_SPELLINGS = (
     "gc.work_outcome=shipped",
     "gc bd update <id> --set-metadata gc.delivery_state=integration_ready",
     "gc bd list --metadata-field gc.work_outcome=shipped --status=closed",
+    # A warning about the forbidden command is prose, not a mutation.
+    'Never run --metadata \'{"gc.work_outcome": "shipped"}\' on the source anchor.',
 )
 
 
@@ -300,8 +377,7 @@ class DerivedPackCompatibilityTests(unittest.TestCase):
                     self.assertIn("gc.delivery_state=integration_ready", text)
                     self.assertIn("Leave the source anchor open", text)
                     self.assertIn("Never set `gc.work_outcome=shipped`", text)
-                    for pattern in SHIPPED_STAMP_COMMAND_PATTERNS:
-                        self.assertNotRegex(text, pattern)
+                    self.assertFalse(contains_unsafe_shipped_stamp(text))
                     self.assertNotIn("close only the source anchor", text.lower())
 
     def test_packs_import_gascity_base_as_gc(self) -> None:
@@ -680,7 +756,7 @@ class DerivedPackCompatibilityTests(unittest.TestCase):
 
 
 class ShippedStampGuardPatternTests(unittest.TestCase):
-    """Unit-test SHIPPED_STAMP_COMMAND_PATTERNS directly so the negative
+    """Unit-test contains_unsafe_shipped_stamp directly so the negative
     assertion in test_implementation_overrides_submit_open_work_for_integration
     keeps rejecting every bd metadata spelling of a branch-only shipped close.
     Spellings are constructed inline; no pack asset is read."""
@@ -689,18 +765,14 @@ class ShippedStampGuardPatternTests(unittest.TestCase):
         for spelling in UNSAFE_SHIPPED_STAMP_SPELLINGS:
             with self.subTest(spelling=spelling):
                 self.assertTrue(
-                    any(
-                        pattern.search(spelling)
-                        for pattern in SHIPPED_STAMP_COMMAND_PATTERNS
-                    ),
+                    contains_unsafe_shipped_stamp(spelling),
                     f"guard must reject shipped-stamp spelling {spelling!r}",
                 )
 
     def test_patterns_keep_guard_prose_and_read_filters_legal(self) -> None:
         for spelling in SAFE_SHIPPED_PROSE_SPELLINGS:
-            for pattern in SHIPPED_STAMP_COMMAND_PATTERNS:
-                with self.subTest(spelling=spelling, pattern=pattern.pattern):
-                    self.assertNotRegex(spelling, pattern)
+            with self.subTest(spelling=spelling):
+                self.assertFalse(contains_unsafe_shipped_stamp(spelling))
 
 
 if __name__ == "__main__":
