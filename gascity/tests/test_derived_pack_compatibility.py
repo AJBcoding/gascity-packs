@@ -8,11 +8,15 @@ strategy, providerless route targets, the shared claim protocol, the absence
 of provider-native subagent dispatch, and the pack-local compatibility
 ledgers. The matching ledger rows live in `gascity/REQUIREMENTS.md`
 (GC-METH-012) and each pack's `REQUIREMENTS.md`.
+`ShippedStampGuardPatternTests` additionally unit-tests the shipped-stamp
+guard patterns themselves against inline command spellings, without reading
+any pack asset.
 """
 
 from __future__ import annotations
 
 import pathlib
+import re
 import tomllib
 import unittest
 
@@ -104,6 +108,91 @@ IMPLEMENTATION_LIFECYCLE_ASSETS = {
         "assets/workflows/gstack-work-item/implement-item.md",
     ),
 }
+
+# bd exposes exactly two metadata write flags and no short forms for either
+# (`bd update --help`, `bd create --help`; `bd close` has no metadata flag):
+# `--set-metadata key=value` and `--metadata <JSON object | @file.json>`.
+# Both accept `--flag value` and `--flag=value`, either quote style around
+# the pair, the key, or the value alone, tabs, and backslash-newline line
+# continuations. A bare newline ends a shell command, so it is deliberately
+# not a valid separator; that also keeps the read-side list filter
+# `--metadata-field ...` legal, because `-` never follows the flag here.
+SHIPPED_STAMP_FLAG = r"--(?:set-)?metadata(?:=|(?:[ \t]|\\\r?\n)+)"
+
+# Every command spelling that would stamp `gc.work_outcome=shipped` on a
+# source anchor from an implementation override. Guard prose such as
+# "Never set `gc.work_outcome=shipped`", the bare ledger fragment
+# `gc.work_outcome=shipped`, and post-landing transition prose all stay
+# legal: none of them pairs the metadata flag (or a quoted JSON pair) with
+# the shipped value.
+SHIPPED_STAMP_COMMAND_PATTERNS = (
+    # key=value payload: --set-metadata gc.work_outcome=shipped in any
+    # quoting/equals/continuation variant, or the same payload handed to
+    # --metadata by mistake -- the intent is identical.
+    re.compile(
+        SHIPPED_STAMP_FLAG + r"[\"'\\]*gc\.work_outcome[\"'\\]*=[\"'\\]*shipped"
+    ),
+    # Whole-object JSON payload: --metadata '{"gc.work_outcome": "shipped"}'
+    # with any whitespace, escaped quotes, other keys before it, or one
+    # nested-object value ahead of the key. The interior scan cannot cross
+    # the object's closing brace, so a JSON object elsewhere in an asset
+    # never chains onto later prose.
+    re.compile(
+        SHIPPED_STAMP_FLAG
+        + r"[\"'\\]*\{(?:[^{}]|\{[^{}]*\})*"
+        + r"gc\.work_outcome[\"'\\]*\s*:\s*[\"'\\]*shipped"
+    ),
+    # Bare JSON pair "gc.work_outcome": "shipped", quoted like JSON, anywhere
+    # in the asset. Catches payloads routed through `--metadata @file.json`
+    # heredocs and any future JSON-carrying flag. Prose keeps the backticked
+    # `gc.work_outcome=shipped` spelling, so it never matches this.
+    re.compile(r"[\"'\\]+gc\.work_outcome[\"'\\]+\s*:\s*[\"'\\]+shipped"),
+)
+
+# Exercised by ShippedStampGuardPatternTests: command spellings the guard
+# must reject even though none appears in a current asset.
+UNSAFE_SHIPPED_STAMP_SPELLINGS = (
+    "gc bd update gc-123 --set-metadata gc.work_outcome=shipped",
+    "gc bd update gc-123 --set-metadata 'gc.work_outcome=shipped'",
+    'gc bd update gc-123 --set-metadata "gc.work_outcome=shipped"',
+    "gc bd update gc-123 --set-metadata=gc.work_outcome=shipped",
+    "gc bd update gc-123 --set-metadata='gc.work_outcome=shipped'",
+    'gc bd update gc-123 --set-metadata="gc.work_outcome=shipped"',
+    "gc bd update gc-123 --set-metadata gc.work_outcome='shipped'",
+    'gc bd update gc-123 --set-metadata gc.work_outcome="shipped"',
+    "gc bd update gc-123 --set-metadata\tgc.work_outcome=shipped",
+    "gc bd update gc-123 --set-metadata  gc.work_outcome=shipped",
+    "gc bd update gc-123 \\\n  --set-metadata \\\n  gc.work_outcome=shipped",
+    "gc bd update gc-123 --metadata gc.work_outcome=shipped",
+    'gc bd update gc-123 --metadata \'{"gc.work_outcome": "shipped"}\'',
+    'gc bd update gc-123 --metadata \'{"gc.work_outcome":"shipped"}\'',
+    'gc bd update gc-123 --metadata=\'{"gc.work_outcome": "shipped"}\'',
+    'gc bd update gc-123 --metadata "{\\"gc.work_outcome\\": \\"shipped\\"}"',
+    'gc bd update gc-123 --metadata \'{ "gc.work_outcome" : "shipped" }\'',
+    "gc bd update gc-123 --metadata '{\"gc.delivery_state\": "
+    "\"integration_ready\", \"gc.work_outcome\": \"shipped\"}'",
+    "gc bd update gc-123 --metadata '{\"evidence\": {\"tests\": \"pass\"}, "
+    "\"gc.work_outcome\": \"shipped\"}'",
+    "gc bd update gc-123 --metadata '{\n  \"gc.work_outcome\": \"shipped\"\n}'",
+    "gc bd update gc-123 --metadata '{gc.work_outcome: shipped}'",
+    "cat > stamp.json <<'EOF'\n"
+    '{"gc.work_outcome": "shipped"}\n'
+    "EOF\n"
+    "gc bd update gc-123 --metadata @stamp.json",
+)
+
+# Exercised by ShippedStampGuardPatternTests: legitimate spellings from real
+# assets and ledgers the guard must keep legal. The first two are required
+# verbatim by the positive assertions and the ledger fragment list.
+SAFE_SHIPPED_PROSE_SPELLINGS = (
+    "Leave the source anchor open. Never set `gc.work_outcome=shipped` "
+    "from a passing test or task review.",
+    "Only a later exact-record transition may request shipped after "
+    "portable\npost-landing stamping succeeds.",
+    "gc.work_outcome=shipped",
+    "gc bd update <id> --set-metadata gc.delivery_state=integration_ready",
+    "gc bd list --metadata-field gc.work_outcome=shipped --status=closed",
+)
 
 
 def pack_formula_dirs(pack_name: str) -> list[pathlib.Path]:
@@ -211,10 +300,8 @@ class DerivedPackCompatibilityTests(unittest.TestCase):
                     self.assertIn("gc.delivery_state=integration_ready", text)
                     self.assertIn("Leave the source anchor open", text)
                     self.assertIn("Never set `gc.work_outcome=shipped`", text)
-                    self.assertNotRegex(
-                        text,
-                        r"--set-metadata\s+['\"]gc\.work_outcome=shipped",
-                    )
+                    for pattern in SHIPPED_STAMP_COMMAND_PATTERNS:
+                        self.assertNotRegex(text, pattern)
                     self.assertNotIn("close only the source anchor", text.lower())
 
     def test_packs_import_gascity_base_as_gc(self) -> None:
@@ -590,6 +677,30 @@ class DerivedPackCompatibilityTests(unittest.TestCase):
                     "bmad story development must keep its methodology "
                     "review check",
                 )
+
+
+class ShippedStampGuardPatternTests(unittest.TestCase):
+    """Unit-test SHIPPED_STAMP_COMMAND_PATTERNS directly so the negative
+    assertion in test_implementation_overrides_submit_open_work_for_integration
+    keeps rejecting every bd metadata spelling of a branch-only shipped close.
+    Spellings are constructed inline; no pack asset is read."""
+
+    def test_patterns_reject_every_shipped_stamp_command_spelling(self) -> None:
+        for spelling in UNSAFE_SHIPPED_STAMP_SPELLINGS:
+            with self.subTest(spelling=spelling):
+                self.assertTrue(
+                    any(
+                        pattern.search(spelling)
+                        for pattern in SHIPPED_STAMP_COMMAND_PATTERNS
+                    ),
+                    f"guard must reject shipped-stamp spelling {spelling!r}",
+                )
+
+    def test_patterns_keep_guard_prose_and_read_filters_legal(self) -> None:
+        for spelling in SAFE_SHIPPED_PROSE_SPELLINGS:
+            for pattern in SHIPPED_STAMP_COMMAND_PATTERNS:
+                with self.subTest(spelling=spelling, pattern=pattern.pattern):
+                    self.assertNotRegex(spelling, pattern)
 
 
 if __name__ == "__main__":
