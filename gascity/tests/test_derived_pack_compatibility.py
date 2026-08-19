@@ -8,9 +8,11 @@ strategy, providerless route targets, the shared claim protocol, the absence
 of provider-native subagent dispatch, and the pack-local compatibility
 ledgers. The matching ledger rows live in `gascity/REQUIREMENTS.md`
 (GC-METH-012) and each pack's `REQUIREMENTS.md`.
-`ShippedStampGuardPatternTests` additionally unit-tests the shipped-stamp
-guard patterns themselves against inline command spellings, without reading
-any pack asset.
+`ShippedStampGuardAnalyzerTests` additionally unit-tests the shipped-stamp
+analyzer itself against inline command spellings, resolves `@file` metadata
+payloads, sweeps every Markdown asset in the repository for false positives,
+and proves the analyzer fails its own table when any decoding stage is
+weakened.
 """
 
 from __future__ import annotations
@@ -19,8 +21,12 @@ import json
 import pathlib
 import re
 import shlex
+import sys
+import tempfile
 import tomllib
+import typing
 import unittest
+from unittest import mock
 
 import test_formula_assets as base_contract
 
@@ -111,175 +117,399 @@ IMPLEMENTATION_LIFECYCLE_ASSETS = {
     ),
 }
 
+# ---------------------------------------------------------------------------
+# Shipped-stamp guard: a bounded command/payload analyzer.
+#
 # bd exposes exactly two metadata write flags and no short forms for either
 # (`bd update --help`, `bd create --help`; `bd close` has no metadata flag):
 # `--set-metadata key=value` and `--metadata <JSON object | @file.json>`.
-# Both accept `--flag value` and `--flag=value`, either quote style around
-# the pair, the key, or the value alone, tabs, and backslash-newline line
-# continuations. A bare newline ends a shell command, so it is deliberately
-# not a valid separator; that also keeps the read-side list filter
-# `--metadata-field ...` legal, because `-` never follows the flag here.
-SHIPPED_STAMP_FLAG = r"--(?:set-)?metadata(?:=|(?:[ \t]|\\\r?\n)+)"
+# Both accept `--flag value` and `--flag=value`.
+#
+# Matching raw source text cannot decide this question, because a shell and a
+# JSON decoder both rewrite the text before bd ever sees it:
+# `gc.work_"outcome"=shipped`, `$'gc.work_outcome=shipped'` and
+# `{"gc.work_outcome":"shipped"}` are three spellings of one argument.
+# So the guard reconstructs the argument instead of grepping for it: it
+# extracts bounded command regions from the Markdown, normalizes shell
+# quoting, tokenizes with `shlex`, decodes payloads with `json`, and compares
+# the decoded key and value exactly.
+#
+# It is deliberately NOT a shell. It performs no expansion, no substitution,
+# no redirection, no control flow, and no word splitting beyond `shlex`.
+# Anything it cannot decode to an exact literal -- a `$`/backtick-dynamic
+# key, an unparseable payload, an unresolvable `@file` -- is reported as
+# "unresolvable" and fails the guard closed rather than being cleared.
+FORBIDDEN_STAMP_KEY = "gc.work_outcome"
+FORBIDDEN_STAMP_VALUE = "shipped"
 
-# Every command spelling that would stamp `gc.work_outcome=shipped` on a
-# source anchor from an implementation override. Guard prose such as
-# "Never set `gc.work_outcome=shipped`", the bare ledger fragment, and
-# post-landing transition prose all stay legal because scanning starts only at
-# a shell command beginning with `gc bd update` or `gc bd create`.
-SHIPPED_STAMP_COMMAND_PATTERNS = (
-    # key=value payload: --set-metadata gc.work_outcome=shipped in any
-    # quoting/equals/continuation variant, or the same payload handed to
-    # --metadata by mistake -- the intent is identical.
-    re.compile(
-        SHIPPED_STAMP_FLAG + r"[\"'\\]*gc\.work_outcome[\"'\\]*=[\"'\\]*shipped"
-    ),
-    # Whole-object JSON payload fallback for malformed JSON. Valid JSON is
-    # parsed below so Unicode escapes normalize before the key/value check.
-    re.compile(
-        SHIPPED_STAMP_FLAG
-        + r"[\"'\\]*\{(?:[^{}]|\{[^{}]*\})*"
-        + r"gc\.work_outcome[\"'\\]*\s*:\s*[\"'\\]*shipped"
-    ),
-)
+# Exact flag tokens. Comparison is by whole token, so the read-side filter
+# `--metadata-field` is a different token and is never treated as a write.
+METADATA_WRITE_FLAGS = ("--set-metadata", "--metadata")
 
-SHELL_WORD_SEPARATOR = r"(?:[ \t]|\\\r?\n)+"
-MUTATING_COMMAND_CONTEXT = re.compile(
-    r"(?m)(?:^|[;&|])[ \t]*gc"
-    + SHELL_WORD_SEPARATOR
-    + r"bd"
-    + SHELL_WORD_SEPARATOR
-    + r"(?:update|create)\b"
-)
-HEREDOC_FILE = re.compile(
-    r"(?ms)^[ \t]*cat[ \t]+>[ \t]*[\"']?(?P<path>[^ \t\"';]+)[\"']?"
-    r"[ \t]+<<[ \t]*[\"']?(?P<delimiter>[A-Za-z_][\w-]*)[\"']?[ \t]*\n"
-    r"(?P<body>.*?)^[ \t]*(?P=delimiter)[ \t]*$"
-)
+# A physical line continuation is erased by the shell before word splitting.
+# `shlex` does NOT do this -- it emits a literal "\n" token -- so the guard
+# normalizes continuations itself before tokenizing.
+_LINE_CONTINUATION = re.compile(r"\\\r?\n")
+
+# Markdown structure. Commands in these assets live in fenced code blocks and
+# in inline code spans; surrounding prose is not a command. Spans are matched
+# per paragraph, not per line, because a real asset splits one span across a
+# line break (gascity/assets/workflows/build-base/prepare.md).
+_CODE_FENCE = re.compile(r"^[ \t]{0,3}(?:`{3,}|~{3,})")
+_CODE_SPAN = re.compile(r"(`+)([^`][\s\S]*?)\1")
+
+# Only tokenize regions that mention a metadata flag at all.
+_METADATA_FLAG_HINT = re.compile(r"--(?:set-)?metadata\b")
+
+# Shell constructs whose value is decided at runtime, not in the asset.
+_SHELL_DYNAMIC = re.compile(r"[$`]")
+
+# ANSI-C quoting, $'...'. `shlex` does not implement it (it yields a literal
+# "$" glued to the quoted body), so the guard decodes the body itself and
+# re-emits it through `shlex.quote` as an ordinary POSIX-quoted token. That
+# keeps adjacent-token concatenation intact and lets `shlex` do the splitting.
+_ANSI_C_QUOTED = re.compile(r"\$'((?:[^'\\]|\\.)*)'", re.DOTALL)
+_ANSI_C_ESCAPES = {
+    "a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f",
+    "n": "\n", "r": "\r", "t": "\t", "v": "\v",
+    "\\": "\\", "'": "'", '"': '"', "?": "?",
+}
 
 
-def _shell_command_spans(text: str):
-    """Yield executable gc bd update/create command spans, including continuations."""
-    for match in MUTATING_COMMAND_CONTEXT.finditer(text):
-        start = match.start()
-        index = match.end()
-        quote: str | None = None
-        escaped = False
-        braces = 0
-        while index < len(text):
-            char = text[index]
-            if escaped:
-                escaped = False
-            elif char == "\\" and quote != "'":
-                escaped = True
-            elif quote:
-                if char == quote:
-                    quote = None
-            elif char in "'\"":
-                quote = char
-            elif char == "{":
-                braces += 1
-            elif char == "}" and braces:
-                braces -= 1
-            elif char in "\n;" and not braces:
-                break
+class MetadataFinding(typing.NamedTuple):
+    """One decoded metadata write the guard has an opinion about.
+
+    kind is "unsafe" (the decoded argument is exactly the forbidden stamp) or
+    "unresolvable" (the guard could not decode the argument, so it cannot
+    clear it). Both fail the lifecycle guard; only "unsafe" is a positive
+    detection, which is what the repo-wide false-positive sweep counts.
+    """
+
+    kind: str
+    detail: str
+
+
+def _decode_ansi_c_body(body: str) -> str:
+    """Decode the escape sequences bash expands inside $'...'."""
+    decoded: list[str] = []
+    index = 0
+    while index < len(body):
+        char = body[index]
+        if char != "\\" or index + 1 >= len(body):
+            decoded.append(char)
             index += 1
-        yield text[start:index]
-
-
-def _declared_heredoc_files(text: str) -> dict[str, str]:
-    return {
-        match.group("path"): match.group("body")
-        for match in HEREDOC_FILE.finditer(text)
-    }
-
-
-def _json_ships(payload: str) -> bool:
-    try:
-        value = json.loads(payload)
-    except (TypeError, ValueError):
-        return False
-    return isinstance(value, dict) and value.get("gc.work_outcome") == "shipped"
-
-
-def contains_unsafe_shipped_stamp(text: str) -> bool:
-    """Reject shipped metadata only when attached to an executable mutation."""
-    heredoc_files = _declared_heredoc_files(text)
-    for command in _shell_command_spans(text):
-        if SHIPPED_STAMP_COMMAND_PATTERNS[0].search(command):
-            return True
-        if SHIPPED_STAMP_COMMAND_PATTERNS[1].search(command):
-            return True
-        try:
-            tokens = [token for token in shlex.split(command) if token != "\n"]
-        except ValueError:
-            tokens = []
-        for index, token in enumerate(tokens):
-            if token in ("--metadata", "--set-metadata"):
-                payload = tokens[index + 1] if index + 1 < len(tokens) else ""
-            elif token.startswith("--metadata=") or token.startswith("--set-metadata="):
-                payload = token.split("=", 1)[1]
-            else:
-                continue
-            resolved_file = payload.startswith("@")
-            if resolved_file:
-                payload = heredoc_files.get(payload[1:], "")
-            if resolved_file:
-                fallback_text = token.split("=", 1)[0] + " " + payload
-            elif "=" in token:
-                fallback_text = token
-            else:
-                fallback_text = token + " " + payload
-            if _json_ships(payload) or SHIPPED_STAMP_COMMAND_PATTERNS[1].search(
-                fallback_text
+            continue
+        escape = body[index + 1]
+        if escape in _ANSI_C_ESCAPES:
+            decoded.append(_ANSI_C_ESCAPES[escape])
+            index += 2
+        elif escape in ("x", "u", "U"):
+            width = {"x": 2, "u": 4, "U": 8}[escape]
+            digits = ""
+            cursor = index + 2
+            while (
+                cursor < len(body)
+                and len(digits) < width
+                and body[cursor] in "0123456789abcdefABCDEF"
             ):
-                return True
-    return False
+                digits += body[cursor]
+                cursor += 1
+            if digits:
+                decoded.append(chr(int(digits, 16)))
+                index = cursor
+            else:
+                decoded.append(escape)
+                index += 2
+        elif escape in "01234567":
+            digits = ""
+            cursor = index + 1
+            while cursor < len(body) and len(digits) < 3 and body[cursor] in "01234567":
+                digits += body[cursor]
+                cursor += 1
+            decoded.append(chr(int(digits, 8)))
+            index = cursor
+        else:
+            decoded.append(escape)
+            index += 2
+    return "".join(decoded)
 
-# Exercised by ShippedStampGuardPatternTests: command spellings the guard
-# must reject even though none appears in a current asset.
+
+def normalize_line_continuations(text: str) -> str:
+    """Erase backslash-newline the way the shell does before word splitting."""
+    return _LINE_CONTINUATION.sub(" ", text)
+
+
+def normalize_ansi_c_quoting(region: str) -> str:
+    """Rewrite $'...' into an equivalent plain POSIX-quoted token."""
+    return _ANSI_C_QUOTED.sub(
+        lambda match: shlex.quote(_decode_ansi_c_body(match.group(1))), region
+    )
+
+
+def command_regions(text: str) -> list[str]:
+    """Bounded command regions of a Markdown asset.
+
+    A fenced code block is one region (so a quoted payload may span lines).
+    Outside fences, each inline code span in a paragraph is a region; a
+    paragraph with no span at all is treated as one region, which is how a
+    bare command block or a self-test spelling is analyzed.
+    """
+    regions: list[str] = []
+    fenced = False
+    block: list[str] = []
+    paragraph: list[str] = []
+
+    def flush_paragraph() -> None:
+        if not paragraph:
+            return
+        text_block = "\n".join(paragraph)
+        paragraph.clear()
+        spans = [match.group(2) for match in _CODE_SPAN.finditer(text_block)]
+        regions.extend(spans if spans else [text_block])
+
+    for line in normalize_line_continuations(text).split("\n"):
+        if _CODE_FENCE.match(line):
+            flush_paragraph()
+            if fenced:
+                regions.append("\n".join(block))
+            block.clear()
+            fenced = not fenced
+        elif fenced:
+            block.append(line)
+        elif line.strip():
+            paragraph.append(line)
+        else:
+            flush_paragraph()
+    flush_paragraph()
+    if block:
+        regions.append("\n".join(block))
+    return regions
+
+
+def shell_tokens(region: str) -> list[str] | None:
+    """Split a region into shell words, or None if it is not well formed."""
+    try:
+        return shlex.split(normalize_ansi_c_quoting(region), comments=False, posix=True)
+    except ValueError:
+        return None
+
+
+def _decoded_object_findings(payload: object, where: str) -> list[MetadataFinding]:
+    """Judge a decoded JSON metadata object by its top-level keys.
+
+    bd stamps the object's top-level keys, so only those are compared; a
+    nested `{"evidence": {"gc.work_outcome": "shipped"}}` sets no such key.
+    """
+    if not isinstance(payload, dict):
+        return [MetadataFinding("unresolvable", f"{where}: payload is not a JSON object")]
+    findings: list[MetadataFinding] = []
+    for key, value in payload.items():
+        if not isinstance(key, str):
+            findings.append(MetadataFinding("unresolvable", f"{where}: non-string key"))
+        elif key == FORBIDDEN_STAMP_KEY:
+            if value == FORBIDDEN_STAMP_VALUE:
+                findings.append(
+                    MetadataFinding("unsafe", f"{where}: decoded {key}={value}")
+                )
+            elif isinstance(value, str) and _SHELL_DYNAMIC.search(value):
+                findings.append(
+                    MetadataFinding("unresolvable", f"{where}: dynamic value for {key!r}")
+                )
+        elif _SHELL_DYNAMIC.search(key):
+            # The key itself is decided at runtime, so it may expand to the
+            # forbidden one. Reported only if no exact detection was made.
+            findings.append(
+                MetadataFinding("unresolvable", f"{where}: dynamic key {key!r}")
+            )
+    unsafe = [finding for finding in findings if finding.kind == "unsafe"]
+    return unsafe or findings[:1]
+
+
+def _resolve_metadata_file(reference: str, asset_dir: pathlib.Path) -> pathlib.Path | None:
+    """Resolve a literal repo-local `@file` payload, or None if it is not one."""
+    if not reference or reference.startswith("/") or _SHELL_DYNAMIC.search(reference):
+        return None
+    if ".." in pathlib.PurePosixPath(reference).parts:
+        return None
+    for candidate in (asset_dir / reference, PACKS_ROOT / reference):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def decode_metadata_payload(
+    payload: str, asset_dir: pathlib.Path, where: str
+) -> list[MetadataFinding]:
+    """Decode one metadata argument and judge it, or report it unresolvable."""
+    if payload.startswith("@"):
+        resolved = _resolve_metadata_file(payload[1:], asset_dir)
+        if resolved is None:
+            return [MetadataFinding("unresolvable", f"{where}: unresolved {payload}")]
+        try:
+            return _decoded_object_findings(
+                json.loads(resolved.read_text(encoding="utf-8")), f"{where} {payload}"
+            )
+        except (ValueError, OSError):
+            return [MetadataFinding("unresolvable", f"{where}: undecodable {payload}")]
+    stripped = payload.strip()
+    if stripped.startswith("{"):
+        try:
+            return _decoded_object_findings(json.loads(stripped), where)
+        except ValueError:
+            return [MetadataFinding("unresolvable", f"{where}: undecodable JSON {payload!r}")]
+    key, separator, value = payload.partition("=")
+    if not separator:
+        return [MetadataFinding("unresolvable", f"{where}: uninterpretable payload {payload!r}")]
+    if _SHELL_DYNAMIC.search(key):
+        return [MetadataFinding("unresolvable", f"{where}: dynamic key in {payload!r}")]
+    if key != FORBIDDEN_STAMP_KEY:
+        # A literal key that is not the forbidden one cannot stamp it, however
+        # its value is spelled -- so a dynamic value here is not a finding.
+        return []
+    if value == FORBIDDEN_STAMP_VALUE:
+        return [MetadataFinding("unsafe", f"{where}: {payload!r}")]
+    if _SHELL_DYNAMIC.search(value):
+        return [MetadataFinding("unresolvable", f"{where}: dynamic value in {payload!r}")]
+    return []
+
+
+def shipped_stamp_findings(
+    text: str, asset_dir: pathlib.Path | None = None
+) -> list[MetadataFinding]:
+    """Every metadata write in `text` the guard rejects, unsafe or undecodable."""
+    directory = asset_dir if asset_dir is not None else PACKS_ROOT
+    findings: list[MetadataFinding] = []
+    for region in command_regions(text):
+        if not _METADATA_FLAG_HINT.search(region):
+            continue
+        tokens = shell_tokens(region)
+        if tokens is None:
+            findings.append(
+                MetadataFinding("unresolvable", f"untokenizable region: {region.strip()[:80]!r}")
+            )
+            continue
+        index = 0
+        while index < len(tokens):
+            token = tokens[index]
+            if token in METADATA_WRITE_FLAGS:
+                following = tokens[index + 1] if index + 1 < len(tokens) else None
+                if following is not None and not following.startswith("-"):
+                    findings.extend(decode_metadata_payload(following, directory, token))
+                    index += 2
+                    continue
+                # A trailing flag carries no payload, so it stamps nothing.
+                index += 1
+                continue
+            for flag in METADATA_WRITE_FLAGS:
+                if token.startswith(flag + "="):
+                    findings.extend(
+                        decode_metadata_payload(token[len(flag) + 1:], directory, flag)
+                    )
+                    break
+            index += 1
+    return findings
+
+
+def unsafe_shipped_stamp_findings(
+    text: str, asset_dir: pathlib.Path | None = None
+) -> list[MetadataFinding]:
+    """Only the positive detections, for the repo-wide false-positive sweep."""
+    return [f for f in shipped_stamp_findings(text, asset_dir) if f.kind == "unsafe"]
+
+
+# Exercised by ShippedStampGuardAnalyzerTests: command spellings the guard must
+# reject, each with the verdict it must reach. "unsafe" means the analyzer
+# decoded the exact forbidden argument; "unresolvable" means it could not
+# decode the payload and therefore fails closed. Asserting the verdict, not
+# merely "rejected", is what keeps each decoding stage load-bearing.
 UNSAFE_SHIPPED_STAMP_SPELLINGS = (
-    "gc bd update gc-123 --set-metadata gc.work_outcome=shipped",
-    "gc bd update gc-123 --set-metadata 'gc.work_outcome=shipped'",
-    'gc bd update gc-123 --set-metadata "gc.work_outcome=shipped"',
-    "gc bd update gc-123 --set-metadata=gc.work_outcome=shipped",
-    "gc bd update gc-123 --set-metadata='gc.work_outcome=shipped'",
-    'gc bd update gc-123 --set-metadata="gc.work_outcome=shipped"',
-    "gc bd update gc-123 --set-metadata gc.work_outcome='shipped'",
-    'gc bd update gc-123 --set-metadata gc.work_outcome="shipped"',
-    "gc bd update gc-123 --set-metadata\tgc.work_outcome=shipped",
-    "gc bd update gc-123 --set-metadata  gc.work_outcome=shipped",
-    "gc bd update gc-123 \\\n  --set-metadata \\\n  gc.work_outcome=shipped",
-    "gc bd update gc-123 --metadata gc.work_outcome=shipped",
-    'gc bd update gc-123 --metadata \'{"gc.work_outcome": "shipped"}\'',
-    'gc bd update gc-123 --metadata \'{"gc.work_outcome":"shipped"}\'',
-    'gc bd update gc-123 --metadata=\'{"gc.work_outcome": "shipped"}\'',
-    'gc bd update gc-123 --metadata "{\\"gc.work_outcome\\": \\"shipped\\"}"',
-    'gc bd update gc-123 --metadata \'{ "gc.work_outcome" : "shipped" }\'',
-    "gc bd update gc-123 --metadata '{\"gc.delivery_state\": "
-    "\"integration_ready\", \"gc.work_outcome\": \"shipped\"}'",
-    "gc bd update gc-123 --metadata '{\"evidence\": {\"tests\": \"pass\"}, "
-    "\"gc.work_outcome\": \"shipped\"}'",
-    "gc bd update gc-123 --metadata '{\n  \"gc.work_outcome\": \"shipped\"\n}'",
-    "gc bd update gc-123 --metadata '{gc.work_outcome: shipped}'",
-    "gc bd update gc-123 --metadata={gc.work_outcome: shipped}",
-    "gc \\\n  bd update gc-123 --set-metadata gc.work_outcome=shipped",
-    "gc bd \\\n  update gc-123 --set-metadata gc.work_outcome=shipped",
-    # Unicode-escaped JSON key/value must decode to the same prohibited stamp.
-    'gc bd update gc-123 --metadata \'{"gc\\u002ework_outcome":"shipped"}\'',
-    'gc bd update gc-123 --metadata \'{"gc.work_outcome":"shipp\\u0065d"}\'',
-    "cat > stamp.json <<'EOF'\n"
-    '{"gc.work_outcome": "shipped"}\n'
-    "EOF\n"
-    "gc bd update gc-123 --metadata @stamp.json",
-    "cat > stamp.json <<'EOF'\n"
-    "{gc.work_outcome: shipped}\n"
-    "EOF\n"
-    "gc bd update gc-123 --metadata=@stamp.json",
+    # -- key=value payloads, every quoting and separator variant ------------
+    ("unsafe", "gc bd update gc-123 --set-metadata gc.work_outcome=shipped"),
+    ("unsafe", "gc bd update gc-123 --set-metadata 'gc.work_outcome=shipped'"),
+    ("unsafe", 'gc bd update gc-123 --set-metadata "gc.work_outcome=shipped"'),
+    ("unsafe", "gc bd update gc-123 --set-metadata=gc.work_outcome=shipped"),
+    ("unsafe", "gc bd update gc-123 --set-metadata='gc.work_outcome=shipped'"),
+    ("unsafe", 'gc bd update gc-123 --set-metadata="gc.work_outcome=shipped"'),
+    ("unsafe", "gc bd update gc-123 --set-metadata gc.work_outcome='shipped'"),
+    ("unsafe", 'gc bd update gc-123 --set-metadata gc.work_outcome="shipped"'),
+    ("unsafe", "gc bd update gc-123 --set-metadata\tgc.work_outcome=shipped"),
+    ("unsafe", "gc bd update gc-123 --set-metadata  gc.work_outcome=shipped"),
+    ("unsafe", "gc bd update gc-123 \\\n  --set-metadata \\\n  gc.work_outcome=shipped"),
+    ("unsafe", "gc bd update gc-123 --metadata gc.work_outcome=shipped"),
+    # -- whole-object JSON payloads -----------------------------------------
+    ("unsafe", 'gc bd update gc-123 --metadata \'{"gc.work_outcome": "shipped"}\''),
+    ("unsafe", 'gc bd update gc-123 --metadata \'{"gc.work_outcome":"shipped"}\''),
+    ("unsafe", 'gc bd update gc-123 --metadata=\'{"gc.work_outcome": "shipped"}\''),
+    ("unsafe", 'gc bd update gc-123 --metadata "{\\"gc.work_outcome\\": \\"shipped\\"}"'),
+    ("unsafe", 'gc bd update gc-123 --metadata \'{ "gc.work_outcome" : "shipped" }\''),
+    (
+        "unsafe",
+        "gc bd update gc-123 --metadata '{\"gc.delivery_state\": "
+        "\"integration_ready\", \"gc.work_outcome\": \"shipped\"}'",
+    ),
+    (
+        "unsafe",
+        "gc bd update gc-123 --metadata '{\"evidence\": {\"tests\": \"pass\"}, "
+        "\"gc.work_outcome\": \"shipped\"}'",
+    ),
+    ("unsafe", "gc bd update gc-123 --metadata '{\n  \"gc.work_outcome\": \"shipped\"\n}'"),
+    # Not valid JSON, so the guard cannot clear the payload and fails closed.
+    ("unresolvable", "gc bd update gc-123 --metadata '{gc.work_outcome: shipped}'"),
+    # -- @file payloads ------------------------------------------------------
+    # The heredoc writes the file at runtime, so no repo-local literal exists
+    # to inspect; the guard must fail closed on the reference itself and not
+    # on the co-located JSON text, which it never reads as a command.
+    (
+        "unresolvable",
+        "cat > stamp.json <<'EOF'\n"
+        '{"gc.work_outcome": "shipped"}\n'
+        "EOF\n"
+        "gc bd update gc-123 --metadata @stamp.json",
+    ),
+    # -- gas-ftv4 review findings: arguments a shell/JSON decoder produces ---
+    # Shell quote splicing: the shell concatenates the fragments back into the
+    # exact forbidden argument, so raw-text matching never sees it.
+    ("unsafe", 'gc bd update gc-123 --set-metadata gc.work_"outcome"=shipped'),
+    ("unsafe", 'gc bd update gc-123 --set-metadata gc.work_outcome=ship"ped"'),
+    # ANSI-C quoting, which shlex does not implement.
+    ("unsafe", "gc bd update gc-123 --set-metadata $'gc.work_outcome=shipped'"),
+    # JSON \u escapes in the key and in the value.
+    ("unsafe", 'gc bd update gc-123 --metadata \'{"gc.work_\\u006futcome":"shipped"}\''),
+    ("unsafe", 'gc bd update gc-123 --metadata \'{"gc.work_outcome":"shi\\u0070ped"}\''),
+    # A bare @file reference carrying no inline JSON at all.
+    ("unresolvable", "gc bd update gc-123 --metadata @stamp.json"),
 )
 
-# Exercised by ShippedStampGuardPatternTests: legitimate spellings from real
-# assets and ledgers the guard must keep legal. The first two are required
-# verbatim by the positive assertions and the ledger fragment list.
+# Further spellings the analyzer rejects. Kept separate from the review table
+# above so that table stays the exact gas-ftv4 evidence set; these lock in the
+# coverage the decoding stages give for free, so a later simplification that
+# quietly drops one is caught here.
+ADDITIONAL_UNSAFE_SHIPPED_STAMP_SPELLINGS = (
+    # ANSI-C hex and octal escapes decoding to the forbidden value.
+    ("unsafe", "gc bd update gc-123 --set-metadata $'gc.work_outcome=shi\\x70ped'"),
+    ("unsafe", "gc bd update gc-123 --set-metadata $'gc.work_outcome=shi\\160ped'"),
+    # ANSI-C quoting used for only one fragment of a spliced argument.
+    ("unsafe", "gc bd update gc-123 --set-metadata gc.work_$'outcome'=shipped"),
+    # Backslash escaping and alternating quote styles inside one argument.
+    ("unsafe", "gc bd update gc-123 --set-metadata gc.work_\\outcome=shipped"),
+    ("unsafe", "gc bd update gc-123 --set-metadata 'gc.work_'\"outcome\"'=ship'ped"),
+    # A JSON object handed to the key=value flag: same intent, so same verdict.
+    ("unsafe", 'gc bd update gc-123 --set-metadata \'{"gc.work_outcome":"shipped"}\''),
+    # A fenced block that is never closed is still analyzed.
+    ("unsafe", "```bash\ngc bd update gc-123 --set-metadata gc.work_outcome=shipped"),
+    # A Markdown table cell is an inline code span like any other.
+    (
+        "unsafe",
+        "| stamp | `gc bd update gc-123 --set-metadata gc.work_outcome=shipped` |",
+    ),
+)
+
+# Exercised by ShippedStampGuardAnalyzerTests: spellings from real assets and
+# ledgers the guard must keep legal. The first two are required verbatim by
+# the positive assertions and the ledger fragment list. The rest are the
+# over-matching hazards decoding introduces: near-miss keys and values, the
+# read-side filters, prose that names the flags, and the forbidden pair
+# appearing somewhere that does not stamp a top-level key.
 SAFE_SHIPPED_PROSE_SPELLINGS = (
     "Leave the source anchor open. Never set `gc.work_outcome=shipped` "
     "from a passing test or task review.",
@@ -288,8 +518,33 @@ SAFE_SHIPPED_PROSE_SPELLINGS = (
     "gc.work_outcome=shipped",
     "gc bd update <id> --set-metadata gc.delivery_state=integration_ready",
     "gc bd list --metadata-field gc.work_outcome=shipped --status=closed",
-    # A warning about the forbidden command is prose, not a mutation.
-    'Never run --metadata \'{"gc.work_outcome": "shipped"}\' on the source anchor.',
+    # Read-side filters, both separator spellings, are not writes.
+    "gc bd list --metadata-field=gc.work_outcome=shipped",
+    'gc bd list --all --metadata-field "gc.work_outcome=shipped" --json',
+    # Prose naming the flags, verbatim from the base workflow assets.
+    "Do not pass `--metadata` or `--set-metadata` to `gc bd close`.",
+    # Near-miss keys: a superstring, a prefixed key, and a different key.
+    "gc bd update <id> --set-metadata gc.work_outcome_note=shipped",
+    "gc bd update <id> --set-metadata pack.gc.work_outcome=shipped",
+    "gc bd update <id> --set-metadata gc.delivery_state=shipped",
+    # Near-miss values: a superstring and a prefixed value.
+    "gc bd update <id> --set-metadata gc.work_outcome=shipped-after-landing",
+    "gc bd update <id> --set-metadata gc.work_outcome=not-shipped",
+    "gc bd update <id> --set-metadata gc.work_outcome=integration_ready",
+    # The forbidden pair as JSON, but not as a top-level stamped key.
+    'gc bd update <id> --metadata \'{"evidence": {"gc.work_outcome": "shipped"}}\'',
+    'gc bd update <id> --metadata \'{"note": "never gc.work_outcome=shipped"}\'',
+    # A real JSON metadata write from gastown/agents/deacon/prompt.template.md.
+    "gc bd create --type=task --metadata "
+    '\'{"target":"<session>","reason":"<reason>","requester":"deacon"}\'',
+    # A literal key that is not the forbidden one, with a runtime value.
+    "gc bd update <id> --set-metadata gc.github.review_report_path=$REPORT_PATH",
+    # A double-backtick span naming the flag is still only prose.
+    "Use ``--metadata`` and ``--set-metadata`` only on the integration record.",
+    # A read-side filter in a Markdown table cell.
+    "| audit | `gc bd list --metadata-field gc.work_outcome=shipped --json` |",
+    # The forbidden pair nested inside a JSON list value stamps no top-level key.
+    'gc bd update <id> --metadata \'{"history": [{"gc.work_outcome": "shipped"}]}\'',
 )
 
 
@@ -391,14 +646,17 @@ class DerivedPackCompatibilityTests(unittest.TestCase):
         for pack_name, relative_paths in IMPLEMENTATION_LIFECYCLE_ASSETS.items():
             for relative_path in relative_paths:
                 with self.subTest(pack=pack_name, asset=relative_path):
-                    text = (PACKS_ROOT / pack_name / relative_path).read_text(
-                        encoding="utf-8"
-                    )
+                    asset = PACKS_ROOT / pack_name / relative_path
+                    text = asset.read_text(encoding="utf-8")
                     self.assertIn("gc.work_commit", text)
                     self.assertIn("gc.delivery_state=integration_ready", text)
                     self.assertIn("Leave the source anchor open", text)
                     self.assertIn("Never set `gc.work_outcome=shipped`", text)
-                    self.assertFalse(contains_unsafe_shipped_stamp(text))
+                    # Fail closed: an unsafe decoded stamp and a payload the
+                    # analyzer cannot decode are both rejected here. No safe
+                    # case is carved out, because none of these ten assets
+                    # issues a metadata write at all.
+                    self.assertEqual([], shipped_stamp_findings(text, asset.parent))
                     self.assertNotIn("close only the source anchor", text.lower())
 
     def test_packs_import_gascity_base_as_gc(self) -> None:
@@ -776,25 +1034,173 @@ class DerivedPackCompatibilityTests(unittest.TestCase):
                 )
 
 
-class ShippedStampGuardPatternTests(unittest.TestCase):
-    """Unit-test contains_unsafe_shipped_stamp directly so the negative
-    assertion in test_implementation_overrides_submit_open_work_for_integration
-    keeps rejecting every bd metadata spelling of a branch-only shipped close.
-    Spellings are constructed inline; no pack asset is read."""
+# Every unsafe spelling asserted by the superseded pattern-based guard
+# (packs fad14d16, developed in parallel with this analyzer). The analyzer
+# replaced that implementation, so its table is pinned here to prove the
+# replacement lost none of its coverage. Extracted from that revision
+# mechanically, never retyped.
+PATTERN_ERA_UNSAFE_SPELLINGS = (
+    'gc bd update gc-123 --set-metadata gc.work_outcome=shipped',
+    "gc bd update gc-123 --set-metadata 'gc.work_outcome=shipped'",
+    'gc bd update gc-123 --set-metadata "gc.work_outcome=shipped"',
+    'gc bd update gc-123 --set-metadata=gc.work_outcome=shipped',
+    "gc bd update gc-123 --set-metadata='gc.work_outcome=shipped'",
+    'gc bd update gc-123 --set-metadata="gc.work_outcome=shipped"',
+    "gc bd update gc-123 --set-metadata gc.work_outcome='shipped'",
+    'gc bd update gc-123 --set-metadata gc.work_outcome="shipped"',
+    'gc bd update gc-123 --set-metadata\tgc.work_outcome=shipped',
+    'gc bd update gc-123 --set-metadata  gc.work_outcome=shipped',
+    'gc bd update gc-123 \\\n  --set-metadata \\\n  gc.work_outcome=shipped',
+    'gc bd update gc-123 --metadata gc.work_outcome=shipped',
+    'gc bd update gc-123 --metadata \'{"gc.work_outcome": "shipped"}\'',
+    'gc bd update gc-123 --metadata \'{"gc.work_outcome":"shipped"}\'',
+    'gc bd update gc-123 --metadata=\'{"gc.work_outcome": "shipped"}\'',
+    'gc bd update gc-123 --metadata "{\\"gc.work_outcome\\": \\"shipped\\"}"',
+    'gc bd update gc-123 --metadata \'{ "gc.work_outcome" : "shipped" }\'',
+    'gc bd update gc-123 --metadata \'{"gc.delivery_state": "integration_ready", "gc.work_outcome": "shipped"}\'',
+    'gc bd update gc-123 --metadata \'{"evidence": {"tests": "pass"}, "gc.work_outcome": "shipped"}\'',
+    'gc bd update gc-123 --metadata \'{\n  "gc.work_outcome": "shipped"\n}\'',
+    "gc bd update gc-123 --metadata '{gc.work_outcome: shipped}'",
+    'gc bd update gc-123 --metadata={gc.work_outcome: shipped}',
+    'gc \\\n  bd update gc-123 --set-metadata gc.work_outcome=shipped',
+    'gc bd \\\n  update gc-123 --set-metadata gc.work_outcome=shipped',
+    'gc bd update gc-123 --metadata \'{"gc\\u002ework_outcome":"shipped"}\'',
+    'gc bd update gc-123 --metadata \'{"gc.work_outcome":"shipp\\u0065d"}\'',
+    'cat > stamp.json <<\'EOF\'\n{"gc.work_outcome": "shipped"}\nEOF\ngc bd update gc-123 --metadata @stamp.json',
+    "cat > stamp.json <<'EOF'\n{gc.work_outcome: shipped}\nEOF\ngc bd update gc-123 --metadata=@stamp.json",
+)
 
-    def test_patterns_reject_every_shipped_stamp_command_spelling(self) -> None:
-        for spelling in UNSAFE_SHIPPED_STAMP_SPELLINGS:
+
+class ShippedStampGuardAnalyzerTests(unittest.TestCase):
+    """Unit-test the shipped-stamp analyzer directly, so the fail-closed
+    assertion in test_implementation_overrides_submit_open_work_for_integration
+    keeps rejecting every bd metadata spelling of a branch-only shipped close
+    without rejecting the prose that documents the rule. Spellings are
+    constructed inline; the asset sweep is the only test that reads files."""
+
+    def test_analyzer_rejects_every_shipped_stamp_command_spelling(self) -> None:
+        for expected_kind, spelling in (
+            UNSAFE_SHIPPED_STAMP_SPELLINGS + ADDITIONAL_UNSAFE_SHIPPED_STAMP_SPELLINGS
+        ):
             with self.subTest(spelling=spelling):
+                findings = shipped_stamp_findings(spelling)
                 self.assertTrue(
-                    contains_unsafe_shipped_stamp(spelling),
-                    f"guard must reject shipped-stamp spelling {spelling!r}",
+                    findings, f"guard must reject shipped-stamp spelling {spelling!r}"
+                )
+                self.assertEqual(
+                    [expected_kind],
+                    sorted({finding.kind for finding in findings}),
+                    f"wrong verdict for {spelling!r}: {findings}",
                 )
 
-    def test_patterns_keep_guard_prose_and_read_filters_legal(self) -> None:
+    def test_analyzer_keeps_guard_prose_and_read_filters_legal(self) -> None:
         for spelling in SAFE_SHIPPED_PROSE_SPELLINGS:
             with self.subTest(spelling=spelling):
-                self.assertFalse(contains_unsafe_shipped_stamp(spelling))
+                self.assertEqual(
+                    [],
+                    shipped_stamp_findings(spelling),
+                    f"guard must keep safe spelling {spelling!r} legal",
+                )
 
+    def test_analyzer_resolves_repo_local_metadata_files(self) -> None:
+        """A literal @file reference is followed and its decoded object judged;
+        a reference the guard cannot follow fails closed."""
+        with tempfile.TemporaryDirectory() as raw_directory:
+            directory = pathlib.Path(raw_directory)
+            (directory / "unsafe.json").write_text(
+                '{"gc.work_outcome": "shipped"}', encoding="utf-8"
+            )
+            (directory / "escaped.json").write_text(
+                '{"gc.work_\\u006futcome": "shipped"}', encoding="utf-8"
+            )
+            (directory / "safe.json").write_text(
+                '{"gc.delivery_state": "integration_ready"}', encoding="utf-8"
+            )
+            (directory / "broken.json").write_text("{not json", encoding="utf-8")
+            cases = (
+                ("unsafe.json", ["unsafe"]),
+                ("escaped.json", ["unsafe"]),
+                ("safe.json", []),
+                ("broken.json", ["unresolvable"]),
+                ("missing.json", ["unresolvable"]),
+                ("$GENERATED.json", ["unresolvable"]),
+                ("../outside.json", ["unresolvable"]),
+                ("/etc/outside.json", ["unresolvable"]),
+            )
+            for reference, expected in cases:
+                with self.subTest(reference=reference):
+                    findings = shipped_stamp_findings(
+                        f"gc bd update gc-123 --metadata @{reference}", directory
+                    )
+                    self.assertEqual(expected, [finding.kind for finding in findings])
+
+    def test_no_markdown_asset_in_the_repository_trips_the_guard(self) -> None:
+        """Full-repo false-positive sweep: no Markdown asset anywhere in the
+        packs tree may produce an unsafe detection."""
+        assets = sorted(
+            path
+            for path in PACKS_ROOT.rglob("*.md")
+            if ".git" not in path.parts
+        )
+        self.assertGreater(len(assets), 500, "sweep should cover the whole packs tree")
+        tripped = {
+            str(path.relative_to(PACKS_ROOT)): unsafe_shipped_stamp_findings(
+                path.read_text(encoding="utf-8"), path.parent
+            )
+            for path in assets
+        }
+        self.assertEqual({}, {k: v for k, v in tripped.items() if v})
+
+    def test_guard_fails_when_any_decoding_stage_is_weakened(self) -> None:
+        """Teeth: every normalization and decoding stage is load-bearing.
+
+        Each weakening replaces one stage with a plausible weaker version and
+        must break at least one spelling in the table -- either by missing it
+        entirely or by downgrading an exact "unsafe" decode to a fail-closed
+        "unresolvable" guess.
+        """
+        weakenings = {
+            # Raw-text matching instead of shell tokenization.
+            "shell_tokens": lambda region: region.split(),
+            # Ignore ANSI-C quoting, as shlex alone does.
+            "normalize_ansi_c_quoting": lambda region: region,
+            # Leave backslash-newline in place, as shlex alone does.
+            "normalize_line_continuations": lambda text: text,
+            # Compare payload text without decoding it.
+            "decode_metadata_payload": lambda payload, asset_dir, where: (
+                [MetadataFinding("unsafe", where)]
+                if payload == f"{FORBIDDEN_STAMP_KEY}={FORBIDDEN_STAMP_VALUE}"
+                else []
+            ),
+        }
+        for stage, weaker in weakenings.items():
+            with self.subTest(stage=stage):
+                with mock.patch.object(sys.modules[__name__], stage, weaker):
+                    mismatches = [
+                        spelling
+                        for expected_kind, spelling in UNSAFE_SHIPPED_STAMP_SPELLINGS
+                        if sorted({f.kind for f in shipped_stamp_findings(spelling)})
+                        != [expected_kind]
+                    ]
+                self.assertTrue(
+                    mismatches,
+                    f"weakening {stage} must break the table, but nothing changed",
+                )
+
+
+    def test_analyzer_rejects_every_pattern_era_spelling(self) -> None:
+        """The analyzer supersedes a parallel pattern-based guard; every
+        spelling that guard rejected must still be rejected here, or the
+        replacement silently narrowed coverage."""
+        # The table is frozen history, so its size is pinned: an emptied or
+        # truncated corpus would make the loop below pass vacuously.
+        self.assertEqual(28, len(PATTERN_ERA_UNSAFE_SPELLINGS))
+        for spelling in PATTERN_ERA_UNSAFE_SPELLINGS:
+            with self.subTest(spelling=spelling):
+                self.assertTrue(
+                    shipped_stamp_findings(spelling),
+                    f"analyzer must reject pattern-era spelling {spelling!r}",
+                )
 
 if __name__ == "__main__":
     unittest.main()
